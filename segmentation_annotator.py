@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QSlider, QSpinBox, QComboBox, QColorDialog, 
                                QScrollArea, QMessageBox, QGroupBox, QListWidget)
 from PySide6.QtCore import Qt, QPoint, Signal
-from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QImage, QPaintEvent, QMouseEvent
+from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QImage, QPaintEvent, QMouseEvent, QShortcut, QKeySequence
 import numpy as np
 from PIL import Image
 
@@ -38,6 +38,16 @@ class PaintWidget(QWidget):
         self.show_cursor = False
         self.setMouseTracking(True)  # Enable mouse tracking for cursor
         
+        # Undo system
+        self.mask_history = []
+        self.max_history = 50  # Limit history to prevent memory issues
+        
+        # Zoom system
+        self.zoom_factor = 1.0
+        self.min_zoom = 0.1
+        self.max_zoom = 10.0
+        self.original_size = None
+        
     def load_image(self, image_path):
         try:
             # Try loading with PIL first for better format support
@@ -59,7 +69,10 @@ class PaintWidget(QWidget):
             self.mask = np.zeros((self.image.height(), self.image.width()), dtype=np.uint8)
             self.mask_overlay = None
             self.mask_dirty = True
-            self.setFixedSize(self.image.size())
+            # Clear history when loading new image
+            self.mask_history = []
+            self.original_size = self.image.size()
+            self.update_widget_size()
             self.update()
             return True, "Success"
             
@@ -74,6 +87,87 @@ class PaintWidget(QWidget):
     
     def set_eraser_mode(self, enabled):
         self.eraser_mode = enabled
+    
+    def save_mask_state(self):
+        """Save current mask state to history for undo functionality"""
+        if self.mask is not None:
+            # Add current mask to history
+            self.mask_history.append(self.mask.copy())
+            # Limit history size
+            if len(self.mask_history) > self.max_history:
+                self.mask_history.pop(0)
+    
+    def undo(self):
+        """Undo last operation by restoring previous mask state"""
+        if len(self.mask_history) > 0 and self.mask is not None:
+            # Restore previous mask state
+            self.mask = self.mask_history.pop()
+            self.mask_dirty = True
+            self.update()
+            
+            # Signal that mask has been modified
+            parent = self.parent()
+            while parent and not hasattr(parent, 'mask_modified'):
+                parent = parent.parent()
+            if parent:
+                parent.mask_modified = True
+            return True
+        return False
+    
+    def can_undo(self):
+        """Check if undo is available"""
+        return len(self.mask_history) > 0
+    
+    def set_zoom(self, zoom_factor):
+        """Set zoom factor and update widget size"""
+        self.zoom_factor = max(self.min_zoom, min(self.max_zoom, zoom_factor))
+        self.update_widget_size()
+        self.update()
+    
+    def update_widget_size(self):
+        """Update widget size based on zoom factor"""
+        if self.original_size is not None:
+            new_size = self.original_size * self.zoom_factor
+            self.setFixedSize(new_size)
+    
+    def get_zoom_factor(self):
+        """Get current zoom factor"""
+        return self.zoom_factor
+    
+    def screen_to_image_coords(self, screen_point):
+        """Convert screen coordinates to image coordinates accounting for zoom"""
+        if self.zoom_factor == 0:
+            return screen_point
+        return QPoint(int(screen_point.x() / self.zoom_factor), int(screen_point.y() / self.zoom_factor))
+    
+    def wheelEvent(self, event):
+        """Handle mouse wheel for zooming"""
+        if self.image is not None:
+            # Zoom with Ctrl+wheel
+            if event.modifiers() & Qt.ControlModifier:
+                delta = event.angleDelta().y()
+                zoom_in = delta > 0
+                zoom_step = 0.1
+                
+                if zoom_in:
+                    new_zoom = self.zoom_factor + zoom_step
+                else:
+                    new_zoom = self.zoom_factor - zoom_step
+                
+                self.set_zoom(new_zoom)
+                
+                # Update parent zoom controls
+                parent = self.parent()
+                while parent and not hasattr(parent, 'update_zoom_display'):
+                    parent = parent.parent()
+                if parent and hasattr(parent, 'update_zoom_display'):
+                    parent.update_zoom_display()
+                
+                event.accept()
+            else:
+                super().wheelEvent(event)
+        else:
+            super().wheelEvent(event)
     
     def enterEvent(self, event):
         self.show_cursor = True
@@ -123,8 +217,13 @@ class PaintWidget(QWidget):
             
         painter = QPainter(self)
         
-        # Draw the original image
-        painter.drawPixmap(0, 0, self.image)
+        # Draw the original image scaled
+        if self.zoom_factor != 1.0 and self.original_size is not None:
+            scaled_size = self.original_size * self.zoom_factor
+            scaled_image = self.image.scaled(scaled_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawPixmap(0, 0, scaled_image)
+        else:
+            painter.drawPixmap(0, 0, self.image)
         
         # Draw the mask overlay (use cached version if available)
         if self.mask is not None:
@@ -132,11 +231,17 @@ class PaintWidget(QWidget):
                 self.update_mask_overlay()
             
             if self.mask_overlay is not None:
-                painter.drawPixmap(0, 0, self.mask_overlay)
+                if self.zoom_factor != 1.0 and self.original_size is not None:
+                    scaled_size = self.original_size * self.zoom_factor
+                    scaled_overlay = self.mask_overlay.scaled(scaled_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    painter.drawPixmap(0, 0, scaled_overlay)
+                else:
+                    painter.drawPixmap(0, 0, self.mask_overlay)
         
-        # Draw brush cursor
+        # Draw brush cursor (scaled with zoom)
         if self.show_cursor and self.image is not None:
-            radius = self.brush_size // 2
+            scaled_brush_size = int(self.brush_size * self.zoom_factor)
+            radius = scaled_brush_size // 2
             # Set pen for hollow circle
             if self.eraser_mode:
                 # Red circle for eraser mode
@@ -147,28 +252,36 @@ class PaintWidget(QWidget):
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)  # Hollow circle
             painter.drawEllipse(self.cursor_pos.x() - radius, self.cursor_pos.y() - radius, 
-                              self.brush_size, self.brush_size)
+                              scaled_brush_size, scaled_brush_size)
     
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.image is not None:
+            # Save current mask state for undo before starting to draw
+            self.save_mask_state()
             self.drawing = True
-            self.last_point = event.position().toPoint()
+            self.last_point = self.screen_to_image_coords(event.position().toPoint())
             self.draw_on_mask(self.last_point)
     
     def mouseMoveEvent(self, event):
-        # Update cursor position for brush preview
+        # Update cursor position for brush preview (screen coordinates)
         self.cursor_pos = event.position().toPoint()
         if self.show_cursor:
             self.update()
         
         if event.buttons() & Qt.LeftButton and self.drawing and self.image is not None:
-            current_point = event.position().toPoint()
+            current_point = self.screen_to_image_coords(event.position().toPoint())
             self.draw_line(self.last_point, current_point)
             self.last_point = current_point
     
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.drawing = False
+            # Update undo button availability in parent
+            parent = self.parent()
+            while parent and not hasattr(parent, 'undo_btn'):
+                parent = parent.parent()
+            if parent and hasattr(parent, 'undo_btn'):
+                parent.undo_btn.setEnabled(self.can_undo())
     
     def draw_on_mask(self, point):
         if self.mask is None:
@@ -380,7 +493,41 @@ class SegmentationAnnotator(QMainWindow):
         self.clear_mask_btn.setEnabled(False)
         mask_layout.addWidget(self.clear_mask_btn)
         
+        self.undo_btn = QPushButton("Undo (Ctrl+Z)")
+        self.undo_btn.clicked.connect(self.undo_last_action)
+        self.undo_btn.setEnabled(False)
+        mask_layout.addWidget(self.undo_btn)
+        
         left_layout.addWidget(mask_group)
+        
+        # Zoom controls group
+        zoom_group = QGroupBox("Zoom Controls")
+        zoom_layout = QVBoxLayout(zoom_group)
+        
+        # Zoom buttons
+        zoom_buttons_layout = QHBoxLayout()
+        self.zoom_in_btn = QPushButton("Zoom In (+)")
+        self.zoom_in_btn.clicked.connect(self.zoom_in)
+        self.zoom_in_btn.setEnabled(False)
+        zoom_buttons_layout.addWidget(self.zoom_in_btn)
+        
+        self.zoom_out_btn = QPushButton("Zoom Out (-)")
+        self.zoom_out_btn.clicked.connect(self.zoom_out)
+        self.zoom_out_btn.setEnabled(False)
+        zoom_buttons_layout.addWidget(self.zoom_out_btn)
+        
+        zoom_layout.addLayout(zoom_buttons_layout)
+        
+        self.zoom_reset_btn = QPushButton("Reset Zoom (1:1)")
+        self.zoom_reset_btn.clicked.connect(self.zoom_reset)
+        self.zoom_reset_btn.setEnabled(False)
+        zoom_layout.addWidget(self.zoom_reset_btn)
+        
+        # Zoom level display
+        self.zoom_label = QLabel("Zoom: 100%")
+        zoom_layout.addWidget(self.zoom_label)
+        
+        left_layout.addWidget(zoom_group)
         
         # Add stretch at bottom to push everything up and maintain fixed spacing
         left_layout.addStretch()
@@ -402,6 +549,29 @@ class SegmentationAnnotator(QMainWindow):
         # Add panels to main layout
         main_layout.addWidget(left_panel)
         main_layout.addWidget(right_panel)
+        
+        # Setup keyboard shortcuts
+        self.setup_shortcuts()
+    
+    def setup_shortcuts(self):
+        """Setup keyboard shortcuts"""
+        # Undo shortcut (Ctrl+Z)
+        self.undo_shortcut = QShortcut(QKeySequence.Undo, self)
+        self.undo_shortcut.activated.connect(self.undo_last_action)
+        
+        # Zoom shortcuts
+        self.zoom_in_shortcut = QShortcut(QKeySequence.ZoomIn, self)
+        self.zoom_in_shortcut.activated.connect(self.zoom_in)
+        
+        self.zoom_out_shortcut = QShortcut(QKeySequence.ZoomOut, self)
+        self.zoom_out_shortcut.activated.connect(self.zoom_out)
+        
+        # Additional zoom shortcuts with + and - keys
+        self.zoom_in_plus = QShortcut(QKeySequence("+"), self)
+        self.zoom_in_plus.activated.connect(self.zoom_in)
+        
+        self.zoom_out_minus = QShortcut(QKeySequence("-"), self)
+        self.zoom_out_minus.activated.connect(self.zoom_out)
     
     def setup_default_classes(self):
         """Setup default classes when no class file is loaded"""
@@ -545,6 +715,11 @@ class SegmentationAnnotator(QMainWindow):
             self.current_image_path = file_path
             self.save_mask_btn.setEnabled(True)
             self.clear_mask_btn.setEnabled(True)
+            self.undo_btn.setEnabled(False)  # No history when loading new image
+            self.zoom_in_btn.setEnabled(True)
+            self.zoom_out_btn.setEnabled(True)
+            self.zoom_reset_btn.setEnabled(True)
+            self.update_zoom_display()
             
             # Try to load existing mask if it exists
             self.load_existing_mask()
@@ -800,13 +975,52 @@ class SegmentationAnnotator(QMainWindow):
         if color.isValid():
             self.paint_widget.add_class_color(current_class, color)
     
+    def undo_last_action(self):
+        """Undo the last paint/erase action"""
+        if self.paint_widget.undo():
+            # Update undo button state
+            self.undo_btn.setEnabled(self.paint_widget.can_undo())
+    
+    def zoom_in(self):
+        """Zoom in the image"""
+        current_zoom = self.paint_widget.get_zoom_factor()
+        new_zoom = current_zoom + 0.2
+        self.paint_widget.set_zoom(new_zoom)
+        self.update_zoom_display()
+    
+    def zoom_out(self):
+        """Zoom out the image"""
+        current_zoom = self.paint_widget.get_zoom_factor()
+        new_zoom = current_zoom - 0.2
+        self.paint_widget.set_zoom(new_zoom)
+        self.update_zoom_display()
+    
+    def zoom_reset(self):
+        """Reset zoom to 100%"""
+        self.paint_widget.set_zoom(1.0)
+        self.update_zoom_display()
+    
+    def update_zoom_display(self):
+        """Update zoom level display"""
+        zoom_percent = int(self.paint_widget.get_zoom_factor() * 100)
+        self.zoom_label.setText(f"Zoom: {zoom_percent}%")
+        
+        # Update button states
+        current_zoom = self.paint_widget.get_zoom_factor()
+        self.zoom_in_btn.setEnabled(current_zoom < self.paint_widget.max_zoom)
+        self.zoom_out_btn.setEnabled(current_zoom > self.paint_widget.min_zoom)
+    
     def clear_mask(self):
         reply = QMessageBox.question(
             self, "Clear Mask", "Are you sure you want to clear the entire mask?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
         if reply == QMessageBox.Yes:
+            # Save state before clearing for undo
+            self.paint_widget.save_mask_state()
             self.paint_widget.clear_mask()
+            # Update undo button state
+            self.undo_btn.setEnabled(self.paint_widget.can_undo())
 
 
 def main():
