@@ -33,6 +33,10 @@ class PaintWidget(QWidget):
         self.mask_opacity = 128
         self.last_point = QPoint()
         self.update_regions = []
+        self.eraser_mode = False
+        self.cursor_pos = QPoint()
+        self.show_cursor = False
+        self.setMouseTracking(True)  # Enable mouse tracking for cursor
         
     def load_image(self, image_path):
         try:
@@ -67,6 +71,17 @@ class PaintWidget(QWidget):
     
     def set_current_class(self, class_id):
         self.current_class = class_id
+    
+    def set_eraser_mode(self, enabled):
+        self.eraser_mode = enabled
+    
+    def enterEvent(self, event):
+        self.show_cursor = True
+        self.update()
+    
+    def leaveEvent(self, event):
+        self.show_cursor = False
+        self.update()
     
     def set_mask_opacity(self, opacity):
         self.mask_opacity = opacity
@@ -118,6 +133,21 @@ class PaintWidget(QWidget):
             
             if self.mask_overlay is not None:
                 painter.drawPixmap(0, 0, self.mask_overlay)
+        
+        # Draw brush cursor
+        if self.show_cursor and self.image is not None:
+            radius = self.brush_size // 2
+            # Set pen for hollow circle
+            if self.eraser_mode:
+                # Red circle for eraser mode
+                pen = QPen(QColor(255, 0, 0), 2)
+            else:
+                # White circle with black outline for paint mode
+                pen = QPen(QColor(255, 255, 255), 2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)  # Hollow circle
+            painter.drawEllipse(self.cursor_pos.x() - radius, self.cursor_pos.y() - radius, 
+                              self.brush_size, self.brush_size)
     
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.image is not None:
@@ -126,6 +156,11 @@ class PaintWidget(QWidget):
             self.draw_on_mask(self.last_point)
     
     def mouseMoveEvent(self, event):
+        # Update cursor position for brush preview
+        self.cursor_pos = event.position().toPoint()
+        if self.show_cursor:
+            self.update()
+        
         if event.buttons() & Qt.LeftButton and self.drawing and self.image is not None:
             current_point = event.position().toPoint()
             self.draw_line(self.last_point, current_point)
@@ -151,7 +186,10 @@ class PaintWidget(QWidget):
                 if dx*dx + dy*dy <= radius*radius:
                     mask_x, mask_y = x + dx, y + dy
                     if 0 <= mask_x < self.mask.shape[1] and 0 <= mask_y < self.mask.shape[0]:
-                        self.mask[mask_y, mask_x] = self.current_class
+                        if self.eraser_mode:
+                            self.mask[mask_y, mask_x] = 0  # Set to background
+                        else:
+                            self.mask[mask_y, mask_x] = self.current_class
         
         self.mask_dirty = True
         # Only update the affected region for better performance
@@ -287,6 +325,13 @@ class SegmentationAnnotator(QMainWindow):
         self.brush_size_label = QLabel("10")
         brush_layout.addWidget(self.brush_size_label)
         
+        # Eraser toggle
+        self.eraser_btn = QPushButton("Eraser Mode")
+        self.eraser_btn.setCheckable(True)
+        self.eraser_btn.setChecked(False)
+        self.eraser_btn.clicked.connect(self.toggle_eraser_mode)
+        brush_layout.addWidget(self.eraser_btn)
+        
         left_layout.addWidget(brush_group)
         
         # Class selection group
@@ -410,7 +455,6 @@ class SegmentationAnnotator(QMainWindow):
                 if 'feature_type' in namespace:
                     class_definitions = namespace['feature_type']()
                     self.load_classes_from_definitions(class_definitions)
-                    QMessageBox.information(self, "Success", f"Loaded {len(class_definitions)} class definitions")
                 else:
                     QMessageBox.warning(self, "Error", "No 'feature_type' function found in the file")
             except Exception as exec_error:
@@ -423,7 +467,6 @@ class SegmentationAnnotator(QMainWindow):
                     if hasattr(module, 'feature_type'):
                         class_definitions = module.feature_type()
                         self.load_classes_from_definitions(class_definitions)
-                        QMessageBox.information(self, "Success", f"Loaded {len(class_definitions)} class definitions")
                     else:
                         QMessageBox.warning(self, "Error", "No 'feature_type' function found in the file")
                 except Exception as module_error:
@@ -685,6 +728,18 @@ class SegmentationAnnotator(QMainWindow):
     def update_brush_size(self, value):
         self.paint_widget.set_brush_size(value)
         self.brush_size_label.setText(str(value))
+    
+    def toggle_eraser_mode(self):
+        is_eraser = self.eraser_btn.isChecked()
+        self.paint_widget.set_eraser_mode(is_eraser)
+        
+        # Update button text and appearance
+        if is_eraser:
+            self.eraser_btn.setText("🗲 Eraser Mode")
+            self.eraser_btn.setStyleSheet("QPushButton { background-color: #ffcccc; }")
+        else:
+            self.eraser_btn.setText("Eraser Mode")
+            self.eraser_btn.setStyleSheet("")
     
     def update_current_class(self, row):
         # If we have class definitions, map the list row to the actual class ID
