@@ -48,6 +48,9 @@ class PaintWidget(QWidget):
         self.max_zoom = 10.0
         self.original_size = None
         
+        # Double-click detection for flood fill
+        self.double_click_enabled = True
+        
     def load_image(self, image_path):
         try:
             # Try loading with PIL first for better format support
@@ -262,6 +265,24 @@ class PaintWidget(QWidget):
             self.last_point = self.screen_to_image_coords(event.position().toPoint())
             self.draw_on_mask(self.last_point)
     
+    def mouseDoubleClickEvent(self, event):
+        """Handle double-click for flood fill"""
+        if event.button() == Qt.LeftButton and self.image is not None and not self.eraser_mode:
+            current_pos = self.screen_to_image_coords(event.position().toPoint())
+            print(f"Double-click detected at {current_pos.x()}, {current_pos.y()}")
+            
+            # Perform flood fill
+            if self.flood_fill(current_pos, self.current_class):
+                print("Flood fill successful")
+                # Update undo button availability in parent
+                parent = self.parent()
+                while parent and not hasattr(parent, 'undo_btn'):
+                    parent = parent.parent()
+                if parent and hasattr(parent, 'undo_btn'):
+                    parent.undo_btn.setEnabled(self.can_undo())
+            else:
+                print("Flood fill failed or no area to fill")
+    
     def mouseMoveEvent(self, event):
         # Update cursor position for brush preview (screen coordinates)
         self.cursor_pos = event.position().toPoint()
@@ -329,6 +350,96 @@ class PaintWidget(QWidget):
     
     def get_mask(self):
         return self.mask.copy() if self.mask is not None else None
+    
+    def flood_fill(self, start_point, fill_class):
+        """Fill an enclosed region using flood fill algorithm"""
+        if self.mask is None:
+            print("Flood fill failed: no mask")
+            return False
+            
+        x, y = start_point.x(), start_point.y()
+        print(f"Flood fill starting at ({x}, {y}), mask shape: {self.mask.shape}")
+        
+        if not (0 <= x < self.mask.shape[1] and 0 <= y < self.mask.shape[0]):
+            print(f"Flood fill failed: coordinates out of bounds")
+            return False
+        
+        # Save state for undo
+        self.save_mask_state()
+        
+        # Get the original value at the starting point
+        original_value = self.mask[y, x]
+        print(f"Original value at ({x}, {y}): {original_value}, target class: {fill_class}")
+        
+        # If already the target class, find nearby background area to fill
+        if original_value == fill_class:
+            print(f"Clicked on existing class {fill_class}, searching for nearby background area...")
+            
+            # Search in expanding circles for a background (class 0) pixel
+            max_search_radius = min(50, min(self.mask.shape) // 10)  # Limit search radius
+            found_bg = False
+            
+            for radius in range(1, max_search_radius + 1):
+                for angle in range(0, 360, 15):  # Check every 15 degrees
+                    search_x = x + int(radius * np.cos(np.radians(angle)))
+                    search_y = y + int(radius * np.sin(np.radians(angle)))
+                    
+                    if (0 <= search_x < self.mask.shape[1] and 
+                        0 <= search_y < self.mask.shape[0] and
+                        self.mask[search_y, search_x] == 0):  # Found background
+                        
+                        print(f"Found background area at ({search_x}, {search_y}), radius {radius}")
+                        x, y = search_x, search_y
+                        original_value = 0
+                        found_bg = True
+                        break
+                
+                if found_bg:
+                    break
+            
+            if not found_bg:
+                print("No nearby background area found to fill")
+                return False
+        
+        # Use a stack-based flood fill to avoid recursion depth issues
+        stack = [(x, y)]
+        filled_pixels = 0
+        max_fill_pixels = 100000  # Prevent filling extremely large areas
+        
+        while stack and filled_pixels < max_fill_pixels:
+            cx, cy = stack.pop()
+            
+            # Skip if out of bounds or already processed
+            if not (0 <= cx < self.mask.shape[1] and 0 <= cy < self.mask.shape[0]):
+                continue
+            if self.mask[cy, cx] != original_value:
+                continue
+            
+            # Fill this pixel
+            self.mask[cy, cx] = fill_class
+            filled_pixels += 1
+            
+            # Add adjacent pixels to stack
+            stack.append((cx + 1, cy))
+            stack.append((cx - 1, cy))
+            stack.append((cx, cy + 1))
+            stack.append((cx, cy - 1))
+        
+        print(f"Flood fill completed: {filled_pixels} pixels filled")
+        
+        if filled_pixels > 0:
+            self.mask_dirty = True
+            self.update()
+            
+            # Signal that mask has been modified
+            parent = self.parent()
+            while parent and not hasattr(parent, 'mask_modified'):
+                parent = parent.parent()
+            if parent:
+                parent.mask_modified = True
+            
+            return True
+        return False
     
     def clear_mask(self):
         if self.mask is not None:
@@ -444,6 +555,12 @@ class SegmentationAnnotator(QMainWindow):
         self.eraser_btn.setChecked(False)
         self.eraser_btn.clicked.connect(self.toggle_eraser_mode)
         brush_layout.addWidget(self.eraser_btn)
+        
+        # Flood fill instructions
+        flood_fill_label = QLabel("💡 Flood Fill: Double-click inside a closed region to fill it instantly")
+        flood_fill_label.setWordWrap(True)
+        flood_fill_label.setStyleSheet("QLabel { color: #666; font-size: 9pt; padding: 5px; background-color: #f0f0f0; border-radius: 3px; }")
+        brush_layout.addWidget(flood_fill_label)
         
         left_layout.addWidget(brush_group)
         
