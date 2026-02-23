@@ -2,12 +2,14 @@ import sys
 import os
 import glob
 import importlib.util
+import json
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QLabel, QPushButton, QFileDialog, 
                                QSlider, QSpinBox, QComboBox, QColorDialog, 
-                               QScrollArea, QMessageBox, QGroupBox, QListWidget)
+                               QScrollArea, QMessageBox, QGroupBox, QListWidget,
+                               QMenuBar, QMenu)
 from PySide6.QtCore import Qt, QPoint, Signal
-from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QImage, QPaintEvent, QMouseEvent, QShortcut, QKeySequence
+from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QImage, QPaintEvent, QMouseEvent, QShortcut, QKeySequence, QAction
 import numpy as np
 from PIL import Image
 
@@ -461,6 +463,7 @@ class SegmentationAnnotator(QMainWindow):
         self.setWindowTitle("Segmentation Annotator")
         self.setGeometry(100, 100, 1200, 800)
         
+        self.current_session_file = None
         self.current_image_path = None
         self.mask_save_folder = None
         self.image_folder = None
@@ -479,13 +482,115 @@ class SegmentationAnnotator(QMainWindow):
         }
         
         self.init_ui()
+        self.setup_menu()
+        
+        # Load session if available
+        self.load_session()
+        
+    def setup_menu(self):
+        menubar = self.menuBar()
+        
+        # File Menu
+        file_menu = menubar.addMenu("&File")
+
+        open_session_action = QAction("Open Session", self)
+        open_session_action.setShortcut("Ctrl+O")
+        open_session_action.triggered.connect(self.open_session_dialog)
+        file_menu.addAction(open_session_action)
+
+        save_session_action = QAction("Save Session", self)
+        save_session_action.triggered.connect(self.save_session_dialog)
+        file_menu.addAction(save_session_action)
+
+        save_session_as_action = QAction("Save As Session...", self)
+        save_session_as_action.setShortcut("Ctrl+Shift+S")
+        save_session_as_action.triggered.connect(self.save_session_as_dialog)
+        file_menu.addAction(save_session_as_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # Edit Menu
+        edit_menu = menubar.addMenu("&Edit")
+        
+        undo_action = QAction("Undo", self)
+        undo_action.setShortcut("Ctrl+Z")
+        undo_action.triggered.connect(self.undo_last_action)
+        edit_menu.addAction(undo_action)
+        
+        edit_menu.addSeparator()
+        
+        clear_mask_action = QAction("Clear Mask", self)
+        clear_mask_action.triggered.connect(self.clear_mask)
+        edit_menu.addAction(clear_mask_action)
+        
+        # Setting Menu
+        setting_menu = menubar.addMenu("&Setting")
+        
+        load_class_action = QAction("Load Class Definition", self)
+        load_class_action.triggered.connect(self.load_class_definitions)
+        setting_menu.addAction(load_class_action)
+        
+        set_image_path_action = QAction("Set Image Path", self)
+        set_image_path_action.triggered.connect(self.load_image_folder)
+        setting_menu.addAction(set_image_path_action)
+        
+        set_mask_path_action = QAction("Set Mask Path", self)
+        set_mask_path_action.triggered.connect(self.set_mask_folder)
+        setting_menu.addAction(set_mask_path_action)
+        
+        # View Menu
+        view_menu = menubar.addMenu("&View")
+        
+        self.zoom_in_action = QAction("Zoom In", self)
+        self.zoom_in_action.setShortcut("W")
+        self.zoom_in_action.triggered.connect(self.zoom_in)
+        self.zoom_in_action.setEnabled(False)
+        view_menu.addAction(self.zoom_in_action)
+        
+        self.zoom_out_action = QAction("Zoom Out", self)
+        self.zoom_out_action.setShortcut("S")
+        self.zoom_out_action.triggered.connect(self.zoom_out)
+        self.zoom_out_action.setEnabled(False)
+        view_menu.addAction(self.zoom_out_action)
+        
+        self.zoom_reset_action = QAction("Reset Zoom (1:1)", self)
+        self.zoom_reset_action.setShortcut("Ctrl+0")
+        self.zoom_reset_action.triggered.connect(self.zoom_reset)
+        self.zoom_reset_action.setEnabled(False)
+        view_menu.addAction(self.zoom_reset_action)
+        
+        # About Menu
+        about_menu = menubar.addMenu("&About")
+        
+        about_action = QAction("About Segmentation Annotator", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        about_menu.addAction(about_action)
+        
+    def show_about_dialog(self):
+        QMessageBox.about(self, "About Segmentation Annotator",
+                          "<b>Segmentation Annotator</b><br><br>"
+                          "A tool for annotating segmentation masks.")
     
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
         # Main layout
-        main_layout = QHBoxLayout(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        
+        # Top info panel
+        self.paths_label = QLabel("<b>Image Path:</b> Not Set &nbsp;&nbsp;|&nbsp;&nbsp; <b>Mask Path:</b> Not Set")
+        self.paths_label.setStyleSheet("padding: 7px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; font-size: 10pt;")
+        main_layout.addWidget(self.paths_label)
+        
+        # Content layout
+        content_layout = QHBoxLayout()
+        main_layout.addLayout(content_layout)
         
         # Left panel for controls
         left_panel = QWidget()
@@ -496,22 +601,14 @@ class SegmentationAnnotator(QMainWindow):
         file_group = QGroupBox("File Operations")
         file_layout = QVBoxLayout(file_group)
         
-        self.load_class_btn = QPushButton("Load Class Definitions")
-        self.load_class_btn.clicked.connect(self.load_class_definitions)
-        file_layout.addWidget(self.load_class_btn)
-        
-        self.load_folder_btn = QPushButton("Select Image Folder")
-        self.load_folder_btn.clicked.connect(self.load_image_folder)
-        file_layout.addWidget(self.load_folder_btn)
-        
         # Navigation controls
         nav_layout = QHBoxLayout()
-        self.prev_btn = QPushButton("◀ Previous")
+        self.prev_btn = QPushButton("◀ Previous (Left)")
         self.prev_btn.clicked.connect(self.previous_image)
         self.prev_btn.setEnabled(False)
         nav_layout.addWidget(self.prev_btn)
         
-        self.next_btn = QPushButton("Next ▶")
+        self.next_btn = QPushButton("Next ▶ (Right)")
         self.next_btn.clicked.connect(self.next_image)
         self.next_btn.setEnabled(False)
         nav_layout.addWidget(self.next_btn)
@@ -523,11 +620,7 @@ class SegmentationAnnotator(QMainWindow):
         self.image_info_label.setWordWrap(True)
         file_layout.addWidget(self.image_info_label)
         
-        self.set_mask_folder_btn = QPushButton("Set Mask Save Folder")
-        self.set_mask_folder_btn.clicked.connect(self.set_mask_folder)
-        file_layout.addWidget(self.set_mask_folder_btn)
-        
-        self.save_mask_btn = QPushButton("Save Mask")
+        self.save_mask_btn = QPushButton("Save Mask (Ctrl+S)")
         self.save_mask_btn.clicked.connect(self.save_mask)
         self.save_mask_btn.setEnabled(False)
         file_layout.addWidget(self.save_mask_btn)
@@ -539,7 +632,7 @@ class SegmentationAnnotator(QMainWindow):
         brush_layout = QVBoxLayout(brush_group)
         
         # Brush size
-        brush_layout.addWidget(QLabel("Brush Size:"))
+        brush_layout.addWidget(QLabel("Brush Size (A/D):"))
         self.brush_size_slider = QSlider(Qt.Horizontal)
         self.brush_size_slider.setRange(1, 50)
         self.brush_size_slider.setValue(10)
@@ -550,7 +643,7 @@ class SegmentationAnnotator(QMainWindow):
         brush_layout.addWidget(self.brush_size_label)
         
         # Eraser toggle
-        self.eraser_btn = QPushButton("Eraser Mode")
+        self.eraser_btn = QPushButton("Eraser Mode (E)")
         self.eraser_btn.setCheckable(True)
         self.eraser_btn.setChecked(False)
         self.eraser_btn.clicked.connect(self.toggle_eraser_mode)
@@ -617,28 +710,9 @@ class SegmentationAnnotator(QMainWindow):
         
         left_layout.addWidget(mask_group)
         
-        # Zoom controls group
-        zoom_group = QGroupBox("Zoom Controls")
+        # Zoom info group
+        zoom_group = QGroupBox("View Info")
         zoom_layout = QVBoxLayout(zoom_group)
-        
-        # Zoom buttons
-        zoom_buttons_layout = QHBoxLayout()
-        self.zoom_in_btn = QPushButton("Zoom In (+)")
-        self.zoom_in_btn.clicked.connect(self.zoom_in)
-        self.zoom_in_btn.setEnabled(False)
-        zoom_buttons_layout.addWidget(self.zoom_in_btn)
-        
-        self.zoom_out_btn = QPushButton("Zoom Out (-)")
-        self.zoom_out_btn.clicked.connect(self.zoom_out)
-        self.zoom_out_btn.setEnabled(False)
-        zoom_buttons_layout.addWidget(self.zoom_out_btn)
-        
-        zoom_layout.addLayout(zoom_buttons_layout)
-        
-        self.zoom_reset_btn = QPushButton("Reset Zoom (1:1)")
-        self.zoom_reset_btn.clicked.connect(self.zoom_reset)
-        self.zoom_reset_btn.setEnabled(False)
-        zoom_layout.addWidget(self.zoom_reset_btn)
         
         # Zoom level display
         self.zoom_label = QLabel("Zoom: 100%")
@@ -663,9 +737,9 @@ class SegmentationAnnotator(QMainWindow):
         
         right_layout.addWidget(self.scroll_area)
         
-        # Add panels to main layout
-        main_layout.addWidget(left_panel)
-        main_layout.addWidget(right_panel)
+        # Add panels to content layout
+        content_layout.addWidget(left_panel)
+        content_layout.addWidget(right_panel)
         
         # Setup keyboard shortcuts
         self.setup_shortcuts()
@@ -676,7 +750,7 @@ class SegmentationAnnotator(QMainWindow):
         self.undo_shortcut = QShortcut(QKeySequence.Undo, self)
         self.undo_shortcut.activated.connect(self.undo_last_action)
         
-        # Zoom shortcuts
+        # Zoom shortcuts (Ctrl++ and Ctrl+- keep working as fallbacks)
         self.zoom_in_shortcut = QShortcut(QKeySequence.ZoomIn, self)
         self.zoom_in_shortcut.activated.connect(self.zoom_in)
         
@@ -689,12 +763,44 @@ class SegmentationAnnotator(QMainWindow):
         
         self.zoom_out_minus = QShortcut(QKeySequence("-"), self)
         self.zoom_out_minus.activated.connect(self.zoom_out)
+        
+        # Brush shortcuts
+        self.brush_inc = QShortcut(QKeySequence("D"), self)
+        self.brush_inc.activated.connect(lambda: self.brush_size_slider.setValue(self.brush_size_slider.value() + 1))
+        
+        self.brush_dec = QShortcut(QKeySequence("A"), self)
+        self.brush_dec.activated.connect(lambda: self.brush_size_slider.setValue(self.brush_size_slider.value() - 1))
+        
+        # Eraser shortcut
+        self.eraser_shortcut = QShortcut(QKeySequence("E"), self)
+        self.eraser_shortcut.activated.connect(self.eraser_btn.click)
+        
+        # Navigation shortcuts
+        self.prev_shortcut = QShortcut(QKeySequence("Left"), self)
+        self.prev_shortcut.activated.connect(self.previous_image)
+        
+        self.next_shortcut = QShortcut(QKeySequence("Right"), self)
+        self.next_shortcut.activated.connect(self.next_image)
+        
+        # Save Mask shortcut
+        self.save_mask_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.save_mask_shortcut.activated.connect(self.save_mask)
+        
+        # Class selection shortcuts 1-9
+        for i in range(1, 10):
+            shortcut = QShortcut(QKeySequence(str(i)), self)
+            shortcut.activated.connect(lambda idx=i: self.select_class_by_shortcut(idx))
+
+    def select_class_by_shortcut(self, key_num):
+        row = key_num - 1
+        if 0 <= row < self.class_list.count():
+            self.class_list.setCurrentRow(row)
     
     def setup_default_classes(self):
         """Setup default classes when no class file is loaded"""
         self.class_list.clear()
         for i in range(1, 6):
-            self.class_list.addItem(f"Class {i}")
+            self.class_list.addItem(f"Class {i} ({i})")
         self.class_names = {i: f"Class {i}" for i in range(1, 6)}
         # Set first item as selected
         if self.class_list.count() > 0:
@@ -773,6 +879,7 @@ class SegmentationAnnotator(QMainWindow):
         # Process each class definition (skip background at index 0)
         new_class_colors = {0: QColor(0, 0, 0, 0)}  # Keep transparent background
         
+        row_idx = 1
         for i, class_def in enumerate(class_definitions):
             if i == 0:  # Skip background
                 continue
@@ -784,11 +891,14 @@ class SegmentationAnnotator(QMainWindow):
             self.class_names[i] = class_name
             
             # Add to list widget
-            self.class_list.addItem(class_name)
+            shortcut_txt = f" ({row_idx})" if row_idx <= 9 else ""
+            self.class_list.addItem(f"{class_name}{shortcut_txt}")
             
             # Set color with current opacity
             color = QColor(color_rgb[0], color_rgb[1], color_rgb[2], self.paint_widget.mask_opacity)
             new_class_colors[i] = color
+            
+            row_idx += 1
         
         # Set first item as selected
         if self.class_list.count() > 0:
@@ -819,8 +929,10 @@ class SegmentationAnnotator(QMainWindow):
                 self.load_current_image()
                 self.update_navigation_buttons()
                 self.update_image_info()
+                self.update_paths_display()
             else:
                 QMessageBox.warning(self, "Error", "No image files found in the selected folder!")
+                self.update_paths_display()
     
     def load_current_image(self):
         if not self.image_list or self.current_image_index >= len(self.image_list):
@@ -833,9 +945,9 @@ class SegmentationAnnotator(QMainWindow):
             self.save_mask_btn.setEnabled(True)
             self.clear_mask_btn.setEnabled(True)
             self.undo_btn.setEnabled(False)  # No history when loading new image
-            self.zoom_in_btn.setEnabled(True)
-            self.zoom_out_btn.setEnabled(True)
-            self.zoom_reset_btn.setEnabled(True)
+            self.zoom_in_action.setEnabled(True)
+            self.zoom_out_action.setEnabled(True)
+            self.zoom_reset_action.setEnabled(True)
             self.update_zoom_display()
             
             # Try to load existing mask if it exists
@@ -870,7 +982,7 @@ class SegmentationAnnotator(QMainWindow):
                             if i == 0:  # Background
                                 continue
                             color_rgb = class_def[1]  # Use display color
-                            color_to_class[color_rgb] = i
+                            color_to_class[tuple(color_rgb)] = i
                     else:
                         # Use default color mapping
                         default_color_mapping = {
@@ -926,6 +1038,11 @@ class SegmentationAnnotator(QMainWindow):
         current_file = os.path.basename(self.image_list[self.current_image_index])
         info_text = f"Image {self.current_image_index + 1} of {len(self.image_list)}\n{current_file}"
         self.image_info_label.setText(info_text)
+
+    def update_paths_display(self):
+        img_path = self.image_folder if self.image_folder else "Not Set"
+        mask_path = self.mask_save_folder if self.mask_save_folder else "Not Set"
+        self.paths_label.setText(f"<b>Image Path:</b> {img_path} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Mask Path:</b> {mask_path}")
     
     def check_save_before_leave(self):
         if self.mask_modified and self.mask_save_folder:
@@ -947,14 +1064,127 @@ class SegmentationAnnotator(QMainWindow):
     
     def closeEvent(self, event):
         if self.check_save_before_leave():
+            self.save_session()
             event.accept()
         else:
             event.ignore()
+    def open_session_dialog(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Open Session", "", "JSON Files (*.json)"
+        )
+        if file_path:
+            self.load_session(file_path)
+
+    def save_session_dialog(self):
+        if self.current_session_file:
+            self.save_session(self.current_session_file)
+            QMessageBox.information(self, "Success", "Session saved successfully.")
+        else:
+            self.save_session_as_dialog()
+
+    def save_session_as_dialog(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Session As", "", "JSON Files (*.json)"
+        )
+        if file_path:
+            self.save_session(file_path)
+            QMessageBox.information(self, "Success", "Session saved successfully.")
+
+    def save_session(self, file_path=None):
+        if file_path is None:
+            if self.current_session_file:
+                file_path = self.current_session_file
+            else:
+                session_dir = os.path.dirname(os.path.abspath(__file__))
+                file_path = os.path.join(session_dir, 'session.json')
+                
+        self.current_session_file = file_path
+        
+        session_data = {
+            'image_folder': self.image_folder,
+            'mask_save_folder': self.mask_save_folder,
+            'current_image_index': self.current_image_index,
+            'brush_size': self.brush_size_slider.value(),
+            'transparency': self.opacity_slider.value(),
+            'class_names': self.class_names,
+            'class_definitions': self.class_definitions
+        }
+        
+        if hasattr(self, 'paint_widget'):
+            session_data['class_colors'] = {k: [v.red(), v.green(), v.blue(), v.alpha()] for k, v in self.paint_widget.class_colors.items()}
+            
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(session_data, f, indent=4)
+        except Exception as e:
+            print(f"Failed to save session: {e}")
+
+    def load_session(self, file_path=None):
+        if file_path is None:
+            session_dir = os.path.dirname(os.path.abspath(__file__))
+            file_path = os.path.join(session_dir, 'session.json')
+            
+        if not os.path.exists(file_path):
+            return
+            
+        self.current_session_file = file_path
+            
+        try:
+            with open(file_path, 'r') as f:
+                session_data = json.load(f)
+                
+            if 'class_definitions' in session_data:
+                self.class_definitions = session_data['class_definitions']
+                
+            if 'brush_size' in session_data:
+                self.brush_size_slider.setValue(session_data['brush_size'])
+                
+            if 'transparency' in session_data:
+                self.opacity_slider.setValue(session_data['transparency'])
+                
+            if 'class_names' in session_data and 'class_colors' in session_data:
+                class_names = {int(k): v for k, v in session_data['class_names'].items()}
+                class_colors = {int(k): v for k, v in session_data['class_colors'].items()}
+                
+                self.class_names = class_names
+                self.class_list.clear()
+                
+                self.paint_widget.update()
+                    
+            if 'mask_save_folder' in session_data and session_data['mask_save_folder']:
+                self.mask_save_folder = session_data['mask_save_folder']
+                
+            if 'image_folder' in session_data and session_data['image_folder']:
+                folder = session_data['image_folder']
+                if os.path.exists(folder):
+                    self.image_folder = folder
+                    image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.tiff', '*.gif', '*.webp']
+                    self.image_list = []
+                    for ext in image_extensions:
+                        self.image_list.extend(glob.glob(os.path.join(folder, ext)))
+                        self.image_list.extend(glob.glob(os.path.join(folder, ext.upper())))
+                    self.image_list = sorted(list(set(self.image_list)))
+                    
+                    if self.image_list:
+                        if 'current_image_index' in session_data:
+                            self.current_image_index = min(session_data['current_image_index'], len(self.image_list) - 1)
+                        else:
+                            self.current_image_index = 0
+                            
+                        self.load_current_image()
+                        self.update_navigation_buttons()
+                        self.update_image_info()
+                        
+            self.update_paths_display()
+                        
+        except Exception as e:
+            print(f"Failed to load session: {e}")
     
     def set_mask_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Mask Save Folder")
         if folder:
             self.mask_save_folder = folder
+            self.update_paths_display()
     
     def save_mask(self):
         if not self.current_image_path:
@@ -987,7 +1217,7 @@ class SegmentationAnnotator(QMainWindow):
                 if i == 0:  # Background
                     continue
                 color_rgb = class_def[1]  # Use display color
-                class_color_mapping[i] = color_rgb
+                class_color_mapping[i] = tuple(color_rgb)
         else:
             # Use default colors
             default_colors = {
@@ -1066,7 +1296,8 @@ class SegmentationAnnotator(QMainWindow):
         color = QColorDialog.getColor(Qt.red, self, f"Choose color for Class {new_class_id}")
         if color.isValid():
             self.paint_widget.add_class_color(new_class_id, color)
-            self.class_list.addItem(f"Class {new_class_id}")
+            shortcut_txt = f" ({new_class_id})" if new_class_id <= 9 else ""
+            self.class_list.addItem(f"Class {new_class_id}{shortcut_txt}")
             self.class_names[new_class_id] = f"Class {new_class_id}"
     
     def change_class_color(self):
@@ -1122,10 +1353,10 @@ class SegmentationAnnotator(QMainWindow):
         zoom_percent = int(self.paint_widget.get_zoom_factor() * 100)
         self.zoom_label.setText(f"Zoom: {zoom_percent}%")
         
-        # Update button states
+        # Update action states
         current_zoom = self.paint_widget.get_zoom_factor()
-        self.zoom_in_btn.setEnabled(current_zoom < self.paint_widget.max_zoom)
-        self.zoom_out_btn.setEnabled(current_zoom > self.paint_widget.min_zoom)
+        self.zoom_in_action.setEnabled(current_zoom < self.paint_widget.max_zoom)
+        self.zoom_out_action.setEnabled(current_zoom > self.paint_widget.min_zoom)
     
     def clear_mask(self):
         reply = QMessageBox.question(

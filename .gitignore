@@ -26,3 +26,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+datasets/
+00_all_features*
+
