@@ -1,18 +1,294 @@
 {
-    "image_folder": null,
-    "mask_save_folder": null,
-    "mask_suffix_index": 2,
-    "current_image_index": 0,
-    "brush_size": 10,
-    "transparency": 128,
+    "image_folder": "L:/DataScience_L/David/Butterfly_annotation_tool/datasets/crack_small_set/images",
+    "mask_save_folder": "L:/DataScience_L/David/Butterfly_annotation_tool/datasets/crack_small_set/masks",
+    "mask_suffix_index": 0,
+    "current_image_index": 25,
+    "brush_size": 15,
+    "transparency": 153,
     "class_names": {
-        "1": "Class 1",
-        "2": "Class 2",
-        "3": "Class 3",
-        "4": "Class 4",
-        "5": "Class 5"
+        "1": "Crack",
+        "2": "Bsht_scratch",
+        "3": "Dark_spot",
+        "4": "Finger_defect",
+        "5": "Vegetation",
+        "6": "Dark_bleed",
+        "7": "Corner_stain",
+        "8": "Small_animal",
+        "9": "Bird_drop",
+        "10": "Object_on_top",
+        "11": "Cable",
+        "12": "Busbar_darkening",
+        "13": "Bright_pocket",
+        "14": "Dark_edge",
+        "15": "Cross_crack",
+        "16": "Dark_horizontal_line",
+        "17": "Dark_area",
+        "18": "Dark_circle",
+        "19": "Dark_vertical_line"
     },
-    "class_definitions": null,
+    "class_definitions": [
+        [
+            "Background",
+            [
+                255,
+                255,
+                255
+            ]
+        ],
+        [
+            "Crack",
+            [
+                179,
+                71,
+                71
+            ],
+            [
+                179,
+                71,
+                71
+            ]
+        ],
+        [
+            "Bsht_scratch",
+            [
+                143,
+                179,
+                71
+            ],
+            [
+                143,
+                179,
+                71
+            ]
+        ],
+        [
+            "Dark_spot",
+            [
+                71,
+                179,
+                71
+            ],
+            [
+                71,
+                179,
+                71
+            ]
+        ],
+        [
+            "Finger_defect",
+            [
+                147,
+                205,
+                215
+            ],
+            [
+                147,
+                205,
+                215
+            ]
+        ],
+        [
+            "Vegetation",
+            [
+                72,
+                179,
+                143
+            ],
+            [
+                72,
+                179,
+                143
+            ]
+        ],
+        [
+            "Dark_bleed",
+            [
+                71,
+                71,
+                179
+            ],
+            [
+                71,
+                71,
+                179
+            ]
+        ],
+        [
+            "Corner_stain",
+            [
+                143,
+                71,
+                179
+            ],
+            [
+                143,
+                71,
+                179
+            ]
+        ],
+        [
+            "Small_animal",
+            [
+                138,
+                108,
+                103
+            ],
+            [
+                138,
+                108,
+                103
+            ]
+        ],
+        [
+            "Bird_drop",
+            [
+                218,
+                0,
+                150
+            ],
+            [
+                218,
+                0,
+                150
+            ]
+        ],
+        [
+            "Object_on_top",
+            [
+                179,
+                71,
+                143
+            ],
+            [
+                179,
+                71,
+                143
+            ]
+        ],
+        [
+            "Cable",
+            [
+                255,
+                126,
+                0
+            ],
+            [
+                255,
+                126,
+                0
+            ]
+        ],
+        [
+            "Busbar_darkening",
+            [
+                236,
+                231,
+                185
+            ],
+            [
+                236,
+                231,
+                185
+            ]
+        ],
+        [
+            "Bright_pocket",
+            [
+                47,
+                230,
+                232
+            ],
+            [
+                47,
+                230,
+                232
+            ]
+        ],
+        [
+            "Dark_edge",
+            [
+                241,
+                188,
+                133
+            ],
+            [
+                241,
+                188,
+                133
+            ]
+        ],
+        [
+            "Cross_crack",
+            [
+                255,
+                0,
+                0
+            ],
+            [
+                255,
+                0,
+                0
+            ]
+        ],
+        [
+            "Dark_horizontal_line",
+            [
+                155,
+                252,
+                112
+            ],
+            [
+                155,
+                252,
+                112
+            ]
+        ],
+        [
+            "Dark_area",
+            [
+                71,
+                143,
+                179
+            ],
+            [
+                71,
+                143,
+                179
+            ]
+        ],
+        [
+            "Dark_circle",
+            [
+                191,
+                230,
+                200
+            ],
+            [
+                191,
+                230,
+                200
+            ]
+        ],
+        [
+            "Dark_vertical_line",
+            [
+                220,
+                215,
+                235
+            ],
+            [
+                220,
+                215,
+                235
+            ]
+        ]
+    ],
+    "class_definition_path": null,
+    "lock_zoom": true,
+    "last_remove_img_path": "",
+    "last_remove_mask_path": "",
+    "last_remove_words": "",
+    "last_remove_case_sensitive": false,
     "class_colors": {
         "0": [
             0,
@@ -24,31 +300,31 @@
             255,
             0,
             0,
-            128
+            153
         ],
         "2": [
             0,
             255,
             0,
-            128
+            153
         ],
         "3": [
             0,
             0,
             255,
-            128
+            153
         ],
         "4": [
             255,
             255,
             0,
-            128
+            153
         ],
         "5": [
             255,
             0,
             255,
-            128
+            153
         ]
     }
 }

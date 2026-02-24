@@ -19,6 +19,7 @@ from segmentation_app.ui.paint_widget import PaintWidget
 from segmentation_app.config import DEFAULT_CLASS_COLORS
 from segmentation_app.core.session_manager import SessionManager
 from segmentation_app.core.data_manager import DataManager
+from segmentation_app.ui.remove_images_masks_dialog import RemoveImagesMasksDialog
 
 class SegmentationAnnotator(QMainWindow):
     def __init__(self):
@@ -38,6 +39,12 @@ class SegmentationAnnotator(QMainWindow):
         self.class_definition_path = None
         self.class_names = {}
         self.default_class_colors = DEFAULT_CLASS_COLORS
+        
+        self.last_remove_img_path = ""
+        self.last_remove_mask_path = ""
+        self.last_remove_words = ""
+        self.last_remove_case_sensitive = False
+        self.last_saved_session_data = "{}"
         
         self.init_ui()
         self.setup_menu()
@@ -145,6 +152,13 @@ class SegmentationAnnotator(QMainWindow):
         self.zoom_reset_action.setEnabled(False)
         view_menu.addAction(self.zoom_reset_action)
         
+        # Extra Menu
+        extra_menu = menubar.addMenu("&Extra")
+        
+        self.remove_images_masks_action = QAction("Remove images/masks", self)
+        self.remove_images_masks_action.triggered.connect(self.show_remove_images_masks_dialog)
+        extra_menu.addAction(self.remove_images_masks_action)
+        
         # About Menu
         about_menu = menubar.addMenu("&About")
         
@@ -155,6 +169,20 @@ class SegmentationAnnotator(QMainWindow):
     def on_lock_zoom_toggled(self, checked):
         if not checked:
             self.zoom_reset()
+            
+    def show_remove_images_masks_dialog(self):
+        dialog = RemoveImagesMasksDialog(
+            img_path=self.last_remove_img_path,
+            mask_path=self.last_remove_mask_path,
+            words=self.last_remove_words,
+            case_sensitive=self.last_remove_case_sensitive,
+            parent=self
+        )
+        dialog.exec()
+        self.last_remove_img_path = dialog.img_path_input.text()
+        self.last_remove_mask_path = dialog.mask_path_input.text()
+        self.last_remove_words = dialog.words_input.text()
+        self.last_remove_case_sensitive = dialog.case_sensitive_cb.isChecked()
         
     def show_about_dialog(self):
         QMessageBox.about(self, "About Butterfly",
@@ -681,13 +709,28 @@ class SegmentationAnnotator(QMainWindow):
             else:  # Cancel
                 return False
         return True
-    
     def closeEvent(self, event):
-        if self.check_save_before_leave():
-            self.save_session()
-            event.accept()
-        else:
+        if not self.check_save_before_leave():
             event.ignore()
+            return
+            
+        current_session_data_json = json.dumps(self.get_session_data(), sort_keys=True)
+        if hasattr(self, 'last_saved_session_data') and current_session_data_json != self.last_saved_session_data:
+            reply = QMessageBox.question(
+                self, "Save Session", 
+                "There are unsaved changes. Do you want to save the session before closing?",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                QMessageBox.Yes
+            )
+            if reply == QMessageBox.Yes:
+                self.save_session()
+                event.accept()
+            elif reply == QMessageBox.No:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
     def open_session_dialog(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open Session", "", "JSON Files (*.json)"
@@ -710,6 +753,28 @@ class SegmentationAnnotator(QMainWindow):
             self.save_session(file_path)
             self.statusBar().showMessage("Session saved successfully.", 3000)
 
+    def get_session_data(self):
+        session_data = {
+            'image_folder': self.image_folder,
+            'mask_save_folder': self.mask_save_folder,
+            'mask_suffix_index': self.mask_suffix_combo.currentIndex(),
+            'current_image_index': self.current_image_index,
+            'brush_size': self.brush_size_slider.value(),
+            'transparency': self.opacity_slider.value(),
+            'class_names': self.class_names,
+            'class_definitions': self.class_definitions,
+            'class_definition_path': getattr(self, 'class_definition_path', None),
+            'lock_zoom': getattr(self, 'lock_zoom_action', None) is not None and self.lock_zoom_action.isChecked(),
+            'last_remove_img_path': getattr(self, 'last_remove_img_path', ""),
+            'last_remove_mask_path': getattr(self, 'last_remove_mask_path', ""),
+            'last_remove_words': getattr(self, 'last_remove_words', ""),
+            'last_remove_case_sensitive': getattr(self, 'last_remove_case_sensitive', False)
+        }
+        
+        if hasattr(self, 'paint_widget'):
+            session_data['class_colors'] = {k: [v.red(), v.green(), v.blue(), v.alpha()] for k, v in self.paint_widget.class_colors.items()}
+        return session_data
+
     def save_session(self, file_path=None):
         if file_path is None:
             if self.current_session_file:
@@ -721,21 +786,8 @@ class SegmentationAnnotator(QMainWindow):
         self.current_session_file = file_path
         self.update_window_title()
         
-        session_data = {
-            'image_folder': self.image_folder,
-            'mask_save_folder': self.mask_save_folder,
-            'mask_suffix_index': self.mask_suffix_combo.currentIndex(),
-            'current_image_index': self.current_image_index,
-            'brush_size': self.brush_size_slider.value(),
-            'transparency': self.opacity_slider.value(),
-            'class_names': self.class_names,
-            'class_definitions': self.class_definitions,
-            'class_definition_path': getattr(self, 'class_definition_path', None),
-            'lock_zoom': getattr(self, 'lock_zoom_action', None) is not None and self.lock_zoom_action.isChecked()
-        }
-        
-        if hasattr(self, 'paint_widget'):
-            session_data['class_colors'] = {k: [v.red(), v.green(), v.blue(), v.alpha()] for k, v in self.paint_widget.class_colors.items()}
+        session_data = self.get_session_data()
+        self.last_saved_session_data = json.dumps(session_data, sort_keys=True)
             
         success, msg = SessionManager.save_session(file_path, session_data)
         if not success:
@@ -828,7 +880,17 @@ class SegmentationAnnotator(QMainWindow):
                         self.update_navigation_buttons()
                         self.update_image_info()
                         
+            if 'last_remove_img_path' in session_data:
+                self.last_remove_img_path = session_data['last_remove_img_path']
+            if 'last_remove_mask_path' in session_data:
+                self.last_remove_mask_path = session_data['last_remove_mask_path']
+            if 'last_remove_words' in session_data:
+                self.last_remove_words = session_data['last_remove_words']
+            if 'last_remove_case_sensitive' in session_data:
+                self.last_remove_case_sensitive = session_data['last_remove_case_sensitive']
+                
             self.update_paths_display()
+            self.last_saved_session_data = json.dumps(self.get_session_data(), sort_keys=True)
                         
         except Exception as e:
             print(f"Failed to load session: {e}")
