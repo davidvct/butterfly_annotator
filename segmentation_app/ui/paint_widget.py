@@ -445,6 +445,7 @@ class PaintWidget(QWidget):
             self.update()
             
             # Signal that mask has been modified
+            parent = self.parent()
             while parent and not hasattr(parent, 'mask_modified'):
                 parent = parent.parent()
             if parent:

@@ -35,6 +35,7 @@ class SegmentationAnnotator(QMainWindow):
         self.current_image_index = 0
         self.mask_modified = False
         self.class_definitions = None
+        self.class_definition_path = None
         self.class_names = {}
         self.default_class_colors = DEFAULT_CLASS_COLORS
         
@@ -108,6 +109,14 @@ class SegmentationAnnotator(QMainWindow):
         set_mask_path_action.triggered.connect(self.set_mask_folder)
         setting_menu.addAction(set_mask_path_action)
         
+        setting_menu.addSeparator()
+        
+        self.lock_zoom_action = QAction("Lock Zoom", self)
+        self.lock_zoom_action.setCheckable(True)
+        self.lock_zoom_action.setChecked(False)
+        self.lock_zoom_action.triggered.connect(self.on_lock_zoom_toggled)
+        setting_menu.addAction(self.lock_zoom_action)
+        
         # View Menu
         view_menu = menubar.addMenu("&View")
         
@@ -142,6 +151,10 @@ class SegmentationAnnotator(QMainWindow):
         about_action = QAction("About Butterfly", self)
         about_action.triggered.connect(self.show_about_dialog)
         about_menu.addAction(about_action)
+        
+    def on_lock_zoom_toggled(self, checked):
+        if not checked:
+            self.zoom_reset()
         
     def show_about_dialog(self):
         QMessageBox.about(self, "About Butterfly",
@@ -272,7 +285,7 @@ class SegmentationAnnotator(QMainWindow):
         mask_layout = QVBoxLayout(mask_group)
         
         # Mask opacity
-        mask_layout.addWidget(QLabel("Mask Transparency:"))
+        mask_layout.addWidget(QLabel("Mask Transparency (Q/E):"))
         self.opacity_slider = QSlider(Qt.Horizontal)
         self.opacity_slider.setRange(0, 255)
         self.opacity_slider.setValue(128)
@@ -400,14 +413,17 @@ class SegmentationAnnotator(QMainWindow):
         if hasattr(self, 'paint_widget'):
             self.paint_widget.class_colors = self.default_class_colors.copy()
     
-    def load_class_definitions(self):
+    def load_class_definitions(self, file_path=None):
         """Load class definitions from a Python file"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Class Definitions", "", "Python Files (*.py)"
-        )
+        if not isinstance(file_path, str) or not file_path:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Load Class Definitions", "", "Python Files (*.py)"
+            )
         
         if not file_path:
             return
+            
+        self.class_definition_path = file_path
             
         try:
             # First, try to fix the indentation issue by reading and parsing the file manually
@@ -537,6 +553,10 @@ class SegmentationAnnotator(QMainWindow):
             self.load_existing_mask()
             # Reset modification flag for new image
             self.mask_modified = False
+            
+            # Reset zoom if lock zoom is disabled
+            if hasattr(self, 'lock_zoom_action') and not self.lock_zoom_action.isChecked():
+                self.zoom_reset()
         else:
             QMessageBox.warning(self, "Error", f"Failed to load image!\n{message}")
     
@@ -709,7 +729,9 @@ class SegmentationAnnotator(QMainWindow):
             'brush_size': self.brush_size_slider.value(),
             'transparency': self.opacity_slider.value(),
             'class_names': self.class_names,
-            'class_definitions': self.class_definitions
+            'class_definitions': self.class_definitions,
+            'class_definition_path': getattr(self, 'class_definition_path', None),
+            'lock_zoom': getattr(self, 'lock_zoom_action', None) is not None and self.lock_zoom_action.isChecked()
         }
         
         if hasattr(self, 'paint_widget'):
@@ -736,7 +758,13 @@ class SegmentationAnnotator(QMainWindow):
             return
             
         try:
+            if 'lock_zoom' in session_data and hasattr(self, 'lock_zoom_action'):
+                self.lock_zoom_action.setChecked(session_data.get('lock_zoom', False))
                 
+            if 'class_definition_path' in session_data and session_data['class_definition_path']:
+                if os.path.exists(session_data['class_definition_path']):
+                    self.load_class_definitions(session_data['class_definition_path'])
+                    
             if 'mask_suffix_index' in session_data:
                 self.mask_suffix_combo.blockSignals(True)
                 self.mask_suffix_combo.setCurrentIndex(session_data['mask_suffix_index'])
@@ -753,12 +781,33 @@ class SegmentationAnnotator(QMainWindow):
                 
             if 'class_names' in session_data and 'class_colors' in session_data:
                 class_names = {int(k): v for k, v in session_data['class_names'].items()}
-                class_colors = {int(k): v for k, v in session_data['class_colors'].items()}
+                
+                # Check format to handle older or newer session files
+                class_colors = {}
+                for k, v in session_data['class_colors'].items():
+                    if isinstance(v, list) and len(v) >= 3:
+                        class_colors[int(k)] = QColor(v[0], v[1], v[2], v[3] if len(v) > 3 else 255)
+                    elif isinstance(v, str):
+                        class_colors[int(k)] = QColor(v)
+                    else:
+                        class_colors[int(k)] = v # assuming already QColor, though unlikely in JSON
                 
                 self.class_names = class_names
-                self.class_list.clear()
                 
-                self.paint_widget.update()
+                if not getattr(self, 'class_definition_path', None) or not ('class_definition_path' in session_data and os.path.exists(session_data['class_definition_path'])):
+                    self.class_list.clear()
+                    row_idx = 1
+                    for k in sorted(class_names.keys()):
+                        if k == 0: continue
+                        name = class_names[k]
+                        shortcut_txt = f" ({row_idx})" if row_idx <= 9 else ""
+                        self.class_list.addItem(f"{name}{shortcut_txt}")
+                        row_idx += 1
+                
+                if hasattr(self, 'paint_widget'):
+                    self.paint_widget.class_colors = class_colors
+                    self.paint_widget.mask_dirty = True
+                    self.paint_widget.update()
                     
             if 'mask_save_folder' in session_data and session_data['mask_save_folder']:
                 self.mask_save_folder = session_data['mask_save_folder']
