@@ -21,6 +21,7 @@ class PaintWidget(QWidget):
         self.mask = None
         self.mask_overlay = None
         self.mask_dirty = True
+        self.mask_visible = True
         self.drawing = False
         self.brush_size = 10
         self.current_class = 1
@@ -231,7 +232,7 @@ class PaintWidget(QWidget):
             painter.drawPixmap(0, 0, self.image)
         
         # Draw the mask overlay (use cached version if available)
-        if self.mask is not None:
+        if self.mask is not None and self.mask_visible:
             if self.mask_dirty or self.mask_overlay is None:
                 self.update_mask_overlay()
             
@@ -450,17 +451,21 @@ class PaintWidget(QWidget):
             self.update()
             
             # Signal that mask has been modified
-            parent = self.parent()
             while parent and not hasattr(parent, 'mask_modified'):
                 parent = parent.parent()
             if parent:
                 parent.mask_modified = True
 
+    def toggle_mask_visibility(self):
+        self.mask_visible = not self.mask_visible
+        self.update()
+
 
 class SegmentationAnnotator(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Segmentation Annotator")
+        self.current_session_file = None
+        self.update_window_title()
         self.setGeometry(100, 100, 1200, 800)
         
         self.current_session_file = None
@@ -486,6 +491,14 @@ class SegmentationAnnotator(QMainWindow):
         
         # Load session if available
         self.load_session()
+        self.update_window_title()
+
+    def update_window_title(self):
+        base_title = "Butterfly"
+        if hasattr(self, 'current_session_file') and self.current_session_file:
+            self.setWindowTitle(f"{base_title} - {self.current_session_file}")
+        else:
+            self.setWindowTitle(base_title)
         
     def setup_menu(self):
         menubar = self.menuBar()
@@ -546,6 +559,13 @@ class SegmentationAnnotator(QMainWindow):
         # View Menu
         view_menu = menubar.addMenu("&View")
         
+        self.toggle_mask_action = QAction("Hide/Unhide Mask", self)
+        self.toggle_mask_action.setShortcut("I")
+        self.toggle_mask_action.triggered.connect(self.toggle_mask_visibility)
+        view_menu.addAction(self.toggle_mask_action)
+        
+        view_menu.addSeparator()
+        
         self.zoom_in_action = QAction("Zoom In", self)
         self.zoom_in_action.setShortcut("W")
         self.zoom_in_action.triggered.connect(self.zoom_in)
@@ -567,14 +587,16 @@ class SegmentationAnnotator(QMainWindow):
         # About Menu
         about_menu = menubar.addMenu("&About")
         
-        about_action = QAction("About Segmentation Annotator", self)
+        about_action = QAction("About Butterfly", self)
         about_action.triggered.connect(self.show_about_dialog)
         about_menu.addAction(about_action)
         
     def show_about_dialog(self):
-        QMessageBox.about(self, "About Segmentation Annotator",
-                          "<b>Segmentation Annotator</b><br><br>"
-                          "A tool for annotating segmentation masks.")
+        QMessageBox.about(self, "About Butterfly",
+                          "<b>Butterfly</b><br>"
+                          "Segmentation Annotation App<br>"
+                          "Version: 1.0.0<br>"
+                          "Released on: 2026-Feb-24")
     
     def init_ui(self):
         central_widget = QWidget()
@@ -584,7 +606,7 @@ class SegmentationAnnotator(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         
         # Top info panel
-        self.paths_label = QLabel("<b>Image Path:</b> Not Set &nbsp;&nbsp;|&nbsp;&nbsp; <b>Mask Path:</b> Not Set")
+        self.paths_label = QLabel("<b>Image Path:</b> Not Set <br> <b>Mask Path:</b> Not Set")
         self.paths_label.setStyleSheet("padding: 7px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; font-size: 10pt;")
         main_layout.addWidget(self.paths_label)
         
@@ -615,6 +637,16 @@ class SegmentationAnnotator(QMainWindow):
         
         file_layout.addLayout(nav_layout)
         
+        # Mask suffix option
+        suffix_layout = QHBoxLayout()
+        suffix_layout.addWidget(QLabel("Mask Suffix:"))
+        self.mask_suffix_combo = QComboBox()
+        self.mask_suffix_combo.addItems(["None (same name)", "_tagged", "_mask"])
+        self.mask_suffix_combo.setCurrentIndex(2) # Default to '_mask'
+        self.mask_suffix_combo.currentIndexChanged.connect(self.on_mask_suffix_changed)
+        suffix_layout.addWidget(self.mask_suffix_combo)
+        file_layout.addLayout(suffix_layout)
+        
         # Image info
         self.image_info_label = QLabel("No images loaded")
         self.image_info_label.setWordWrap(True)
@@ -643,7 +675,7 @@ class SegmentationAnnotator(QMainWindow):
         brush_layout.addWidget(self.brush_size_label)
         
         # Eraser toggle
-        self.eraser_btn = QPushButton("Eraser Mode (E)")
+        self.eraser_btn = QPushButton("Eraser Mode (M)")
         self.eraser_btn.setCheckable(True)
         self.eraser_btn.setChecked(False)
         self.eraser_btn.clicked.connect(self.toggle_eraser_mode)
@@ -772,8 +804,15 @@ class SegmentationAnnotator(QMainWindow):
         self.brush_dec.activated.connect(lambda: self.brush_size_slider.setValue(self.brush_size_slider.value() - 1))
         
         # Eraser shortcut
-        self.eraser_shortcut = QShortcut(QKeySequence("E"), self)
+        self.eraser_shortcut = QShortcut(QKeySequence("M"), self)
         self.eraser_shortcut.activated.connect(self.eraser_btn.click)
+        
+        # Opacity shortcuts
+        self.opacity_inc = QShortcut(QKeySequence("E"), self)
+        self.opacity_inc.activated.connect(lambda: self.opacity_slider.setValue(min(255, self.opacity_slider.value() + 25)))
+        
+        self.opacity_dec = QShortcut(QKeySequence("Q"), self)
+        self.opacity_dec.activated.connect(lambda: self.opacity_slider.setValue(max(0, self.opacity_slider.value() - 25)))
         
         # Navigation shortcuts
         self.prev_shortcut = QShortcut(QKeySequence("Left"), self)
@@ -957,12 +996,29 @@ class SegmentationAnnotator(QMainWindow):
         else:
             QMessageBox.warning(self, "Error", f"Failed to load image!\n{message}")
     
+    def get_current_mask_suffix(self):
+        suffix_idx = self.mask_suffix_combo.currentIndex()
+        if suffix_idx == 0:
+            return ""
+        elif suffix_idx == 1:
+            return "_tagged"
+        else:
+            return "_mask"
+
+    def on_mask_suffix_changed(self):
+        if hasattr(self, 'current_image_path') and self.current_image_path and getattr(self, 'mask_save_folder', None):
+            if not getattr(self, 'mask_modified', False) or self.check_save_before_leave():
+                self.paint_widget.clear_mask()
+                self.load_existing_mask()
+                self.mask_modified = False # Prevent popup if already handled
+
     def load_existing_mask(self):
-        if not self.current_image_path or not self.mask_save_folder:
+        if not self.current_image_path or not getattr(self, 'mask_save_folder', None):
             return
             
         image_name = os.path.splitext(os.path.basename(self.current_image_path))[0]
-        mask_path = os.path.join(self.mask_save_folder, f"{image_name}_mask.png")
+        suffix = self.get_current_mask_suffix()
+        mask_path = os.path.join(self.mask_save_folder, f"{image_name}{suffix}.png")
         
         if os.path.exists(mask_path):
             try:
@@ -1042,7 +1098,7 @@ class SegmentationAnnotator(QMainWindow):
     def update_paths_display(self):
         img_path = self.image_folder if self.image_folder else "Not Set"
         mask_path = self.mask_save_folder if self.mask_save_folder else "Not Set"
-        self.paths_label.setText(f"<b>Image Path:</b> {img_path} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Mask Path:</b> {mask_path}")
+        self.paths_label.setText(f"<b>Image Path:</b> {img_path} <br> <b>Mask Path:</b> {mask_path}")
     
     def check_save_before_leave(self):
         if self.mask_modified and self.mask_save_folder:
@@ -1078,7 +1134,7 @@ class SegmentationAnnotator(QMainWindow):
     def save_session_dialog(self):
         if self.current_session_file:
             self.save_session(self.current_session_file)
-            QMessageBox.information(self, "Success", "Session saved successfully.")
+            self.statusBar().showMessage("Session saved successfully.", 3000)
         else:
             self.save_session_as_dialog()
 
@@ -1088,7 +1144,7 @@ class SegmentationAnnotator(QMainWindow):
         )
         if file_path:
             self.save_session(file_path)
-            QMessageBox.information(self, "Success", "Session saved successfully.")
+            self.statusBar().showMessage("Session saved successfully.", 3000)
 
     def save_session(self, file_path=None):
         if file_path is None:
@@ -1099,10 +1155,12 @@ class SegmentationAnnotator(QMainWindow):
                 file_path = os.path.join(session_dir, 'session.json')
                 
         self.current_session_file = file_path
+        self.update_window_title()
         
         session_data = {
             'image_folder': self.image_folder,
             'mask_save_folder': self.mask_save_folder,
+            'mask_suffix_index': self.mask_suffix_combo.currentIndex(),
             'current_image_index': self.current_image_index,
             'brush_size': self.brush_size_slider.value(),
             'transparency': self.opacity_slider.value(),
@@ -1128,11 +1186,17 @@ class SegmentationAnnotator(QMainWindow):
             return
             
         self.current_session_file = file_path
+        self.update_window_title()
             
         try:
             with open(file_path, 'r') as f:
                 session_data = json.load(f)
                 
+            if 'mask_suffix_index' in session_data:
+                self.mask_suffix_combo.blockSignals(True)
+                self.mask_suffix_combo.setCurrentIndex(session_data['mask_suffix_index'])
+                self.mask_suffix_combo.blockSignals(False)
+
             if 'class_definitions' in session_data:
                 self.class_definitions = session_data['class_definitions']
                 
@@ -1202,7 +1266,8 @@ class SegmentationAnnotator(QMainWindow):
         
         # Create mask filename based on image filename
         image_name = os.path.splitext(os.path.basename(self.current_image_path))[0]
-        mask_path = os.path.join(self.mask_save_folder, f"{image_name}_mask.png")
+        suffix = self.get_current_mask_suffix()
+        mask_path = os.path.join(self.mask_save_folder, f"{image_name}{suffix}.png")
         
         # Convert mask to RGB for visualization
         height, width = mask.shape
@@ -1369,6 +1434,9 @@ class SegmentationAnnotator(QMainWindow):
             self.paint_widget.clear_mask()
             # Update undo button state
             self.undo_btn.setEnabled(self.paint_widget.can_undo())
+
+    def toggle_mask_visibility(self):
+        self.paint_widget.toggle_mask_visibility()
 
 
 def main():
