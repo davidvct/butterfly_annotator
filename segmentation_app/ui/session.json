@@ -2,9 +2,9 @@
     "image_folder": "L:/DataScience_L/David/Butterfly_annotation_tool/datasets/crack_small_set/images",
     "mask_save_folder": "L:/DataScience_L/David/Butterfly_annotation_tool/datasets/crack_small_set/masks",
     "mask_suffix_index": 0,
-    "current_image_index": 25,
-    "brush_size": 15,
-    "transparency": 153,
+    "current_image_index": 7,
+    "brush_size": 10,
+    "transparency": 134,
     "class_names": {
         "1": "Crack",
         "2": "Bsht_scratch",
@@ -300,31 +300,31 @@
             255,
             0,
             0,
-            153
+            134
         ],
         "2": [
             0,
             255,
             0,
-            153
+            134
         ],
         "3": [
             0,
             0,
             255,
-            153
+            134
         ],
         "4": [
             255,
             255,
             0,
-            153
+            134
         ],
         "5": [
             255,
             0,
             255,
-            153
+            134
         ]
     }
 }

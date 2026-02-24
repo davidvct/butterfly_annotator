@@ -1,6 +1,7 @@
 import sys
 import os
 import glob
+import shutil
 import importlib.util
 import json
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
@@ -159,6 +160,11 @@ class SegmentationAnnotator(QMainWindow):
         self.remove_images_masks_action.triggered.connect(self.show_remove_images_masks_dialog)
         extra_menu.addAction(self.remove_images_masks_action)
         
+        self.move_images_masks_action = QAction("Move Images and Masks", self)
+        self.move_images_masks_action.setShortcut("R")
+        self.move_images_masks_action.triggered.connect(self.move_current_image_and_mask)
+        extra_menu.addAction(self.move_images_masks_action)
+        
         # About Menu
         about_menu = menubar.addMenu("&About")
         
@@ -203,6 +209,12 @@ class SegmentationAnnotator(QMainWindow):
         self.paths_label.setStyleSheet("padding: 7px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; font-size: 10pt;")
         main_layout.addWidget(self.paths_label)
         
+        # Image info
+        self.image_info_label = QLabel("No images loaded")
+        self.image_info_label.setWordWrap(True)
+        self.image_info_label.setStyleSheet("padding: 7px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; font-size: 10pt;")
+        main_layout.addWidget(self.image_info_label)
+        
         # Content layout
         content_layout = QHBoxLayout()
         main_layout.addLayout(content_layout)
@@ -240,10 +252,8 @@ class SegmentationAnnotator(QMainWindow):
         suffix_layout.addWidget(self.mask_suffix_combo)
         file_layout.addLayout(suffix_layout)
         
-        # Image info
-        self.image_info_label = QLabel("No images loaded")
-        self.image_info_label.setWordWrap(True)
-        file_layout.addWidget(self.image_info_label)
+        # Image info removed from here (now at top)
+        
         
         self.save_mask_btn = QPushButton("Save Mask (Ctrl+S)")
         self.save_mask_btn.clicked.connect(self.save_mask)
@@ -1082,5 +1092,75 @@ class SegmentationAnnotator(QMainWindow):
     def toggle_mask_visibility(self):
         self.paint_widget.toggle_mask_visibility()
 
+    def move_current_image_and_mask(self):
+        if not self.current_image_path or not self.image_folder:
+            QMessageBox.warning(self, "Error", "No image is currently loaded.")
+            return
+
+        # Check for unsaved mask changes
+        if getattr(self, 'mask_modified', False):
+            if not self.check_save_before_leave():
+                return
+        
+        parent_dir = os.path.dirname(self.image_folder)
+        moved_dir = os.path.join(parent_dir, 'Moved')
+        
+        if not os.path.exists(moved_dir):
+            try:
+                os.makedirs(moved_dir)
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Could not create Moved folder:\n{str(e)}")
+                return
+                
+        img_path = self.current_image_path
+        image_name_ext = os.path.basename(img_path)
+        image_name = os.path.splitext(image_name_ext)[0]
+        
+        # Move image
+        dest_img_path = os.path.join(moved_dir, image_name_ext)
+        try:
+            shutil.move(img_path, dest_img_path)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not move image:\n{str(e)}")
+            return
+            
+        # Move masks
+        if getattr(self, 'mask_save_folder', None):
+            suffixes = ["", "_tagged", "_mask"]
+            for suffix in suffixes:
+                mask_path = os.path.join(self.mask_save_folder, f"{image_name}{suffix}.png")
+                if os.path.exists(mask_path):
+                    dest_mask_path = os.path.join(moved_dir, f"{image_name}{suffix}.png")
+                    try:
+                        shutil.move(mask_path, dest_mask_path)
+                    except Exception as e:
+                        print(f"Could not move mask {mask_path}: {e}")
+        
+        if img_path in self.image_list:
+            self.image_list.remove(img_path)
+            
+        if not self.image_list:
+            # Clear UI if no images left
+            try:
+                # `clear_image` method might not exist in PaintWidget, so we do manual clear setup if needed
+                # Actually, `paint_widget.load_image` on empty path fails, let's just clear mask and image
+                self.paint_widget.image = None
+                self.paint_widget.scaled_image = None
+                self.paint_widget.mask = None
+                self.paint_widget.scaled_mask = None
+                self.paint_widget.update()
+            except Exception:
+                pass
+            self.current_image_path = None
+            self.image_info_label.setText("No images loaded")
+            self.update_navigation_buttons()
+            return
+
+        if self.current_image_index >= len(self.image_list):
+            self.current_image_index = len(self.image_list) - 1
+            
+        self.load_current_image()
+        self.update_navigation_buttons()
+        self.update_image_info()
 
 
