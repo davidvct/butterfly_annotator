@@ -23,8 +23,17 @@ from segmentation_app.core.data_manager import DataManager
 from segmentation_app.ui.remove_images_masks_dialog import RemoveImagesMasksDialog
 
 class SegmentationAnnotator(QMainWindow):
-    def __init__(self):
+    def __init__(self, version="1.0.0", release_date="2026-Feb-24", default_session_file=None):
         super().__init__()
+        self.app_version = version
+        self.app_release_date = release_date
+        
+        if default_session_file:
+            self.default_session_file = default_session_file
+        else:
+            session_dir = os.path.dirname(os.path.abspath(__file__))
+            self.default_session_file = os.path.join(session_dir, 'session.json')
+            
         self.current_session_file = None
         self.update_window_title()
         self.setGeometry(100, 100, 1200, 800)
@@ -194,8 +203,8 @@ class SegmentationAnnotator(QMainWindow):
         QMessageBox.about(self, "About Butterfly",
                           "<b>Butterfly</b><br>"
                           "Segmentation Annotation App<br>"
-                          "Version: 1.0.0<br>"
-                          "Released on: 2026-Feb-24")
+                          f"Version: {self.app_version}<br>"
+                          f"Released on: {self.app_release_date}")
     
     def init_ui(self):
         central_widget = QWidget()
@@ -790,8 +799,7 @@ class SegmentationAnnotator(QMainWindow):
             if self.current_session_file:
                 file_path = self.current_session_file
             else:
-                session_dir = os.path.dirname(os.path.abspath(__file__))
-                file_path = os.path.join(session_dir, 'session.json')
+                file_path = self.default_session_file
                 
         self.current_session_file = file_path
         self.update_window_title()
@@ -805,8 +813,7 @@ class SegmentationAnnotator(QMainWindow):
 
     def load_session(self, file_path=None):
         if file_path is None:
-            session_dir = os.path.dirname(os.path.abspath(__file__))
-            file_path = os.path.join(session_dir, 'session.json')
+            file_path = self.default_session_file
             
         if not os.path.exists(file_path):
             return
