@@ -1,0 +1,54 @@
+{
+    "image_folder": null,
+    "mask_save_folder": null,
+    "mask_suffix_index": 2,
+    "current_image_index": 0,
+    "brush_size": 10,
+    "transparency": 128,
+    "class_names": {
+        "1": "Class 1",
+        "2": "Class 2",
+        "3": "Class 3",
+        "4": "Class 4",
+        "5": "Class 5"
+    },
+    "class_definitions": null,
+    "class_colors": {
+        "0": [
+            0,
+            0,
+            0,
+            0
+        ],
+        "1": [
+            255,
+            0,
+            0,
+            128
+        ],
+        "2": [
+            0,
+            255,
+            0,
+            128
+        ],
+        "3": [
+            0,
+            0,
+            255,
+            128
+        ],
+        "4": [
+            255,
+            255,
+            0,
+            128
+        ],
+        "5": [
+            255,
+            0,
+            255,
+            128
+        ]
+    }
+}

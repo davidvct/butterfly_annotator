@@ -30,3 +30,5 @@ Thumbs.db
 datasets/
 00_all_features*
 
+# Legacy monolithic files
+archive/
