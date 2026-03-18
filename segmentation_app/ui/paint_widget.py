@@ -13,6 +13,7 @@ from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QImage, QPaintEvent, 
 from segmentation_app.config import DEFAULT_CLASS_COLORS
 import numpy as np
 from PIL import Image
+from scipy import ndimage
 
 
 class PaintWidget(QWidget):
@@ -47,6 +48,11 @@ class PaintWidget(QWidget):
         
         # Double-click detection for flood fill
         self.double_click_enabled = True
+
+        # Bounding box visualization for small annotations
+        self._cached_bboxes = []  # List of (class_id, x, y, w, h) tuples
+        self._bbox_min_size = 50  # Minimum bounding box size in pixels
+        self._bbox_border = 5     # Border thickness in pixels
         
     def load_image(self, image_path):
         try:
@@ -210,6 +216,33 @@ class PaintWidget(QWidget):
         qimage = QImage(rgba_array.data, width, height, QImage.Format_RGBA8888)
         self.mask_overlay = QPixmap.fromImage(qimage)
         self.mask_dirty = False
+
+        # Recompute bounding boxes whenever the overlay is updated
+        self._compute_bounding_boxes()
+
+    def _compute_bounding_boxes(self):
+        """Compute bounding boxes for all connected annotation regions."""
+        if self.mask is None:
+            self._cached_bboxes = []
+            return
+
+        bboxes = []
+        for class_id in np.unique(self.mask):
+            if class_id == 0:
+                continue
+            binary = (self.mask == class_id).astype(np.uint8)
+            labeled, num_features = ndimage.label(binary)
+            for i in range(1, num_features + 1):
+                component = labeled == i
+                ys, xs = np.where(component)
+                if len(ys) == 0:
+                    continue
+                min_y, max_y = int(ys.min()), int(ys.max())
+                min_x, max_x = int(xs.min()), int(xs.max())
+                w = max_x - min_x + 1
+                h = max_y - min_y + 1
+                bboxes.append((int(class_id), min_x, min_y, w, h))
+        self._cached_bboxes = bboxes
     
     def paintEvent(self, event):
         if self.image is None:
@@ -238,6 +271,32 @@ class PaintWidget(QWidget):
                 else:
                     painter.drawPixmap(0, 0, self.mask_overlay)
         
+        # Draw bounding boxes around annotation regions
+        if self.mask is not None and self.mask_visible and self._cached_bboxes:
+            for class_id, bx, by, bw, bh in self._cached_bboxes:
+                # Enforce minimum bounding box size (centered)
+                min_sz = self._bbox_min_size
+                if bw < min_sz:
+                    expand = min_sz - bw
+                    bx -= expand // 2
+                    bw = min_sz
+                if bh < min_sz:
+                    expand = min_sz - bh
+                    by -= expand // 2
+                    bh = min_sz
+
+                # Scale to screen coordinates
+                sx = int(bx * self.zoom_factor)
+                sy = int(by * self.zoom_factor)
+                sw = int(bw * self.zoom_factor)
+                sh = int(bh * self.zoom_factor)
+
+                color = self.class_colors.get(class_id, QColor(255, 255, 255))
+                pen = QPen(QColor(color.red(), color.green(), color.blue(), 255), self._bbox_border)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(sx, sy, sw, sh)
+
         # Draw brush cursor (scaled with zoom)
         if self.show_cursor and self.image is not None:
             scaled_brush_size = int(self.brush_size * self.zoom_factor)

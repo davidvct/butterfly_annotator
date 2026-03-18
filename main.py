@@ -2,9 +2,10 @@ import sys
 import os
 import datetime
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
 from segmentation_app.ui.main_window import SegmentationAnnotator
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "2.0.0"
 
 def get_release_date():
     if getattr(sys, 'frozen', False):
@@ -15,7 +16,14 @@ def get_release_date():
 
 def main():
     app = QApplication(sys.argv)
-    
+
+    icon_path = os.path.join(
+        os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)
+        else os.path.dirname(os.path.abspath(__file__)),
+        'butterfly.jpg'
+    )
+    app.setWindowIcon(QIcon(icon_path))
+
     release_date = get_release_date()
     
     if getattr(sys, 'frozen', False):

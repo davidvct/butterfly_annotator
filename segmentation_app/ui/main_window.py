@@ -245,10 +245,34 @@ class SegmentationAnnotator(QMainWindow):
         content_layout = QHBoxLayout()
         main_layout.addLayout(content_layout)
 
-        # ---- Left panel: Image Name List ----
+        # ---- Left panel: Class Selection + Image Name List ----
         left_panel = QWidget()
         left_panel.setFixedWidth(220)
         left_panel_layout = QVBoxLayout(left_panel)
+
+        # Class selection group
+        class_group = QGroupBox("Class Selection")
+        class_layout = QVBoxLayout(class_group)
+
+        class_label = QLabel("Select Class:")
+        class_label.setContentsMargins(0, 0, 0, 0)
+        class_layout.addWidget(class_label)
+
+        self.class_list = QListWidget()
+        self.class_list.setMinimumHeight(100)
+        self.setup_default_classes()
+        self.class_list.currentRowChanged.connect(self.update_current_class)
+        class_layout.addWidget(self.class_list, 2)
+
+        self.add_class_btn = QPushButton("Add New Class")
+        self.add_class_btn.clicked.connect(self.add_new_class)
+        class_layout.addWidget(self.add_class_btn)
+
+        self.change_color_btn = QPushButton("Change Class Color")
+        self.change_color_btn.clicked.connect(self.change_class_color)
+        class_layout.addWidget(self.change_color_btn)
+
+        left_panel_layout.addWidget(class_group)
 
         left_panel_layout.addWidget(QLabel("Image List:"))
         self.image_name_list = QListWidget()
@@ -351,32 +375,6 @@ class SegmentationAnnotator(QMainWindow):
         brush_layout.addWidget(flood_fill_label)
 
         right_layout.addWidget(brush_group)
-
-        # Class selection group
-        class_group = QGroupBox("Class Selection")
-        class_layout = QVBoxLayout(class_group)
-
-        # Create label with fixed spacing
-        class_label = QLabel("Select Class:")
-        class_label.setContentsMargins(0, 0, 0, 0)
-        class_layout.addWidget(class_label)
-
-        # Create list widget that can expand
-        self.class_list = QListWidget()
-        self.class_list.setMinimumHeight(100)  # Allow shrinking when window is shorter
-        self.setup_default_classes()
-        self.class_list.currentRowChanged.connect(self.update_current_class)
-        class_layout.addWidget(self.class_list, 2)  # stretch factor 2 for expansion
-
-        self.add_class_btn = QPushButton("Add New Class")
-        self.add_class_btn.clicked.connect(self.add_new_class)
-        class_layout.addWidget(self.add_class_btn)
-
-        self.change_color_btn = QPushButton("Change Class Color")
-        self.change_color_btn.clicked.connect(self.change_class_color)
-        class_layout.addWidget(self.change_color_btn)
-
-        right_layout.addWidget(class_group)
 
         # Mask controls group
         mask_group = QGroupBox("Mask Controls")
