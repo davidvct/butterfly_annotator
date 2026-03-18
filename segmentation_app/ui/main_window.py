@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QSlider, QSpinBox, QComboBox, QColorDialog, 
                                QScrollArea, QMessageBox, QGroupBox, QListWidget,
                                QMenuBar, QMenu)
-from PySide6.QtCore import Qt, QPoint, Signal
+from PySide6.QtCore import Qt, QPoint, Signal, QSettings
 from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QImage, QPaintEvent, QMouseEvent, QShortcut, QKeySequence, QAction
 import numpy as np
 from PIL import Image
@@ -27,6 +27,8 @@ class SegmentationAnnotator(QMainWindow):
         super().__init__()
         self.app_version = version
         self.app_release_date = release_date
+        
+        self.settings = QSettings("ButterflyAnnotator", "SegmentationApp")
         
         if default_session_file:
             self.default_session_file = default_session_file
@@ -60,7 +62,21 @@ class SegmentationAnnotator(QMainWindow):
         self.setup_menu()
         
         # Load session if available
-        self.load_session()
+        last_session = self.settings.value("last_session", None)
+        if last_session and os.path.exists(last_session):
+            self.load_session(last_session)
+        else:
+            self.load_session()
+
+        # Load default class definition if none was loaded from session
+        if not self.class_definition_path:
+            default_class_def = os.path.join(
+                os.path.dirname(self.default_session_file),
+                '00_all_features_combined_v1.py'
+            )
+            if os.path.exists(default_class_def):
+                self.load_class_definitions(default_class_def)
+
         self.update_window_title()
 
     def update_window_title(self):
@@ -108,6 +124,7 @@ class SegmentationAnnotator(QMainWindow):
         edit_menu.addSeparator()
         
         clear_mask_action = QAction("Clear Mask", self)
+        clear_mask_action.setShortcut("C")
         clear_mask_action.triggered.connect(self.clear_mask)
         edit_menu.addAction(clear_mask_action)
         
@@ -228,9 +245,13 @@ class SegmentationAnnotator(QMainWindow):
         content_layout = QHBoxLayout()
         main_layout.addLayout(content_layout)
         
-        # Left panel for controls
+        # Left panel for controls (scrollable)
+        left_scroll = QScrollArea()
+        left_scroll.setFixedWidth(270)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         left_panel = QWidget()
-        left_panel.setFixedWidth(250)
+        left_panel.setMaximumWidth(250)
         left_layout = QVBoxLayout(left_panel)
         
         # File operations group
@@ -250,7 +271,13 @@ class SegmentationAnnotator(QMainWindow):
         nav_layout.addWidget(self.next_btn)
         
         file_layout.addLayout(nav_layout)
-        
+
+        # Refresh button
+        self.refresh_btn = QPushButton("Refresh Lists (R)")
+        self.refresh_btn.clicked.connect(self.refresh_lists)
+        self.refresh_btn.setEnabled(False)
+        file_layout.addWidget(self.refresh_btn)
+
         # Mask suffix option
         suffix_layout = QHBoxLayout()
         suffix_layout.addWidget(QLabel("Mask Suffix:"))
@@ -312,7 +339,7 @@ class SegmentationAnnotator(QMainWindow):
         
         # Create list widget that can expand
         self.class_list = QListWidget()
-        self.class_list.setMinimumHeight(400)  # Set minimum height to display more items
+        self.class_list.setMinimumHeight(100)  # Allow shrinking when window is shorter
         self.setup_default_classes()
         self.class_list.currentRowChanged.connect(self.update_current_class)
         class_layout.addWidget(self.class_list, 2)  # stretch factor 2 for expansion
@@ -382,7 +409,8 @@ class SegmentationAnnotator(QMainWindow):
         right_layout.addWidget(self.scroll_area)
         
         # Add panels to content layout
-        content_layout.addWidget(left_panel)
+        left_scroll.setWidget(left_panel)
+        content_layout.addWidget(left_scroll)
         content_layout.addWidget(right_panel)
         
         # Setup keyboard shortcuts
@@ -418,6 +446,10 @@ class SegmentationAnnotator(QMainWindow):
         # Eraser shortcut
         self.eraser_shortcut = QShortcut(QKeySequence("M"), self)
         self.eraser_shortcut.activated.connect(self.eraser_btn.click)
+
+        # Refresh shortcut
+        self.refresh_shortcut = QShortcut(QKeySequence("R"), self)
+        self.refresh_shortcut.activated.connect(self.refresh_lists)
         
         # Opacity shortcuts
         self.opacity_inc = QShortcut(QKeySequence("E"), self)
@@ -572,6 +604,7 @@ class SegmentationAnnotator(QMainWindow):
             
             if self.image_list:
                 self.current_image_index = 0
+                self.refresh_btn.setEnabled(True)
                 self.load_current_image()
                 self.update_navigation_buttons()
                 self.update_image_info()
@@ -579,7 +612,32 @@ class SegmentationAnnotator(QMainWindow):
             else:
                 QMessageBox.warning(self, "Error", "No image files found in the selected folder!")
                 self.update_paths_display()
-    
+
+    def refresh_lists(self):
+        """Refresh both the images and masks list by re-scanning the folders."""
+        if not self.image_folder:
+            return
+
+        # Remember current image name to try to stay on the same image
+        current_name = None
+        if self.image_list and 0 <= self.current_image_index < len(self.image_list):
+            current_name = self.image_list[self.current_image_index]
+
+        self.image_list = DataManager.get_image_list(self.image_folder)
+
+        if self.image_list:
+            # Try to restore position to the same image
+            if current_name and current_name in self.image_list:
+                self.current_image_index = self.image_list.index(current_name)
+            else:
+                self.current_image_index = min(self.current_image_index, len(self.image_list) - 1)
+            self.load_current_image()
+            self.update_navigation_buttons()
+            self.update_image_info()
+        else:
+            self.current_image_index = 0
+            self.image_info_label.setText("No images loaded")
+
     def load_current_image(self):
         if not self.image_list or self.current_image_index >= len(self.image_list):
             return
@@ -664,7 +722,27 @@ class SegmentationAnnotator(QMainWindow):
                     for (r, g, b), class_id in color_to_class.items():
                         mask_indices = np.all(mask_array == [r, g, b], axis=2)
                         class_mask[mask_indices] = class_id
-                    
+
+                    # Detect any remaining colors not in color_to_class and add them dynamically
+                    # so that ALL mask colors are displayed regardless of class definitions
+                    remaining = (class_mask == 0) & ~np.all(mask_array == [0, 0, 0], axis=2)
+                    if np.any(remaining):
+                        remaining_pixels = mask_array[remaining]
+                        unique_colors = np.unique(remaining_pixels.reshape(-1, 3), axis=0)
+                        next_id = max(color_to_class.values()) + 1 if color_to_class else 1
+                        for uc in unique_colors:
+                            r2, g2, b2 = int(uc[0]), int(uc[1]), int(uc[2])
+                            color_to_class[(r2, g2, b2)] = next_id
+                            uc_indices = np.all(mask_array == [r2, g2, b2], axis=2)
+                            class_mask[uc_indices] = next_id
+                            # Add to paint widget colors so they render
+                            self.paint_widget.class_colors[next_id] = QColor(r2, g2, b2, self.paint_widget.mask_opacity)
+                            # Add to class list and class names
+                            class_name = f"Unknown ({r2},{g2},{b2})"
+                            self.class_names[next_id] = class_name
+                            self.class_list.addItem(class_name)
+                            next_id += 1
+
                     self.paint_widget.mask = class_mask
                     self.paint_widget.mask_dirty = True
                     self.paint_widget.update()
@@ -802,6 +880,9 @@ class SegmentationAnnotator(QMainWindow):
                 file_path = self.default_session_file
                 
         self.current_session_file = file_path
+        if hasattr(self, 'settings'):
+            self.settings.setValue("last_session", file_path)
+            self.settings.sync()
         self.update_window_title()
         
         session_data = self.get_session_data()
@@ -825,6 +906,10 @@ class SegmentationAnnotator(QMainWindow):
         if not success:
             print(msg)
             return
+            
+        if hasattr(self, 'settings'):
+            self.settings.setValue("last_session", file_path)
+            self.settings.sync()
             
         try:
             if 'lock_zoom' in session_data and hasattr(self, 'lock_zoom_action'):
@@ -888,11 +973,12 @@ class SegmentationAnnotator(QMainWindow):
                     self.image_list = DataManager.get_image_list(folder)
                     
                     if self.image_list:
+                        self.refresh_btn.setEnabled(True)
                         if 'current_image_index' in session_data:
                             self.current_image_index = min(session_data['current_image_index'], len(self.image_list) - 1)
                         else:
                             self.current_image_index = 0
-                            
+
                         self.load_current_image()
                         self.update_navigation_buttons()
                         self.update_image_info()
@@ -958,10 +1044,9 @@ class SegmentationAnnotator(QMainWindow):
             }
             class_color_mapping.update(default_colors)
         
-        # Add any additional classes that were dynamically added
-        for class_id in range(6, self.class_list.count() + 1):
-            if class_id in self.paint_widget.class_colors:
-                color = self.paint_widget.class_colors[class_id]
+        # Add any additional classes that were dynamically added (including unknown mask colors)
+        for class_id, color in self.paint_widget.class_colors.items():
+            if class_id not in class_color_mapping and class_id != 0:
                 class_color_mapping[class_id] = (color.red(), color.green(), color.blue())
         
         # Apply colors to mask and save
@@ -1085,16 +1170,11 @@ class SegmentationAnnotator(QMainWindow):
         self.zoom_out_action.setEnabled(current_zoom > self.paint_widget.min_zoom)
     
     def clear_mask(self):
-        reply = QMessageBox.question(
-            self, "Clear Mask", "Are you sure you want to clear the entire mask?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            # Save state before clearing for undo
-            self.paint_widget.save_mask_state()
-            self.paint_widget.clear_mask()
-            # Update undo button state
-            self.undo_btn.setEnabled(self.paint_widget.can_undo())
+        # Save state before clearing for undo
+        self.paint_widget.save_mask_state()
+        self.paint_widget.clear_mask()
+        # Update undo button state
+        self.undo_btn.setEnabled(self.paint_widget.can_undo())
 
     def toggle_mask_visibility(self):
         self.paint_widget.toggle_mask_visibility()
