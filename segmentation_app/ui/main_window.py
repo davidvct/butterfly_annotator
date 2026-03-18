@@ -244,36 +244,63 @@ class SegmentationAnnotator(QMainWindow):
         # Content layout
         content_layout = QHBoxLayout()
         main_layout.addLayout(content_layout)
-        
-        # Left panel for controls (scrollable)
-        left_scroll = QScrollArea()
-        left_scroll.setFixedWidth(270)
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # ---- Left panel: Image Name List ----
         left_panel = QWidget()
-        left_panel.setMaximumWidth(250)
-        left_layout = QVBoxLayout(left_panel)
-        
+        left_panel.setFixedWidth(220)
+        left_panel_layout = QVBoxLayout(left_panel)
+
+        left_panel_layout.addWidget(QLabel("Image List:"))
+        self.image_name_list = QListWidget()
+        self.image_name_list.currentRowChanged.connect(self.on_image_name_selected)
+        left_panel_layout.addWidget(self.image_name_list)
+
+        content_layout.addWidget(left_panel)
+
+        # ---- Center panel: Canvas ----
+        center_panel = QWidget()
+        center_layout = QVBoxLayout(center_panel)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setAlignment(Qt.AlignCenter)
+
+        self.paint_widget = PaintWidget()
+        self.scroll_area.setWidget(self.paint_widget)
+
+        center_layout.addWidget(self.scroll_area)
+
+        content_layout.addWidget(center_panel, 1)  # stretch factor so canvas gets remaining space
+
+        # ---- Right panel: Controls (scrollable) ----
+        right_scroll = QScrollArea()
+        right_scroll.setFixedWidth(270)
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        right_panel = QWidget()
+        right_panel.setMaximumWidth(250)
+        right_layout = QVBoxLayout(right_panel)
+
         # File operations group
         file_group = QGroupBox("File Operations")
         file_layout = QVBoxLayout(file_group)
-        
+
         # Navigation controls
         nav_layout = QHBoxLayout()
         self.prev_btn = QPushButton("◀ Previous (Left)")
         self.prev_btn.clicked.connect(self.previous_image)
         self.prev_btn.setEnabled(False)
         nav_layout.addWidget(self.prev_btn)
-        
+
         self.next_btn = QPushButton("Next ▶ (Right)")
         self.next_btn.clicked.connect(self.next_image)
         self.next_btn.setEnabled(False)
         nav_layout.addWidget(self.next_btn)
-        
+
         file_layout.addLayout(nav_layout)
 
         # Refresh button
-        self.refresh_btn = QPushButton("Refresh Lists (R)")
+        self.refresh_btn = QPushButton("Refresh Lists (F5)")
         self.refresh_btn.clicked.connect(self.refresh_lists)
         self.refresh_btn.setEnabled(False)
         file_layout.addWidget(self.refresh_btn)
@@ -287,21 +314,18 @@ class SegmentationAnnotator(QMainWindow):
         self.mask_suffix_combo.currentIndexChanged.connect(self.on_mask_suffix_changed)
         suffix_layout.addWidget(self.mask_suffix_combo)
         file_layout.addLayout(suffix_layout)
-        
-        # Image info removed from here (now at top)
-        
-        
+
         self.save_mask_btn = QPushButton("Save Mask (Ctrl+S)")
         self.save_mask_btn.clicked.connect(self.save_mask)
         self.save_mask_btn.setEnabled(False)
         file_layout.addWidget(self.save_mask_btn)
-        
-        left_layout.addWidget(file_group)
-        
+
+        right_layout.addWidget(file_group)
+
         # Brush controls group
         brush_group = QGroupBox("Brush Controls")
         brush_layout = QVBoxLayout(brush_group)
-        
+
         # Brush size
         brush_layout.addWidget(QLabel("Brush Size (A/D):"))
         self.brush_size_slider = QSlider(Qt.Horizontal)
@@ -309,55 +333,55 @@ class SegmentationAnnotator(QMainWindow):
         self.brush_size_slider.setValue(10)
         self.brush_size_slider.valueChanged.connect(self.update_brush_size)
         brush_layout.addWidget(self.brush_size_slider)
-        
+
         self.brush_size_label = QLabel("10")
         brush_layout.addWidget(self.brush_size_label)
-        
+
         # Eraser toggle
         self.eraser_btn = QPushButton("Eraser Mode (M)")
         self.eraser_btn.setCheckable(True)
         self.eraser_btn.setChecked(False)
         self.eraser_btn.clicked.connect(self.toggle_eraser_mode)
         brush_layout.addWidget(self.eraser_btn)
-        
+
         # Flood fill instructions
         flood_fill_label = QLabel("💡 Flood Fill: Double-click inside a closed region to fill it instantly")
         flood_fill_label.setWordWrap(True)
         flood_fill_label.setStyleSheet("QLabel { color: #666; font-size: 9pt; padding: 5px; background-color: #f0f0f0; border-radius: 3px; }")
         brush_layout.addWidget(flood_fill_label)
-        
-        left_layout.addWidget(brush_group)
-        
+
+        right_layout.addWidget(brush_group)
+
         # Class selection group
         class_group = QGroupBox("Class Selection")
         class_layout = QVBoxLayout(class_group)
-        
+
         # Create label with fixed spacing
         class_label = QLabel("Select Class:")
         class_label.setContentsMargins(0, 0, 0, 0)
         class_layout.addWidget(class_label)
-        
+
         # Create list widget that can expand
         self.class_list = QListWidget()
         self.class_list.setMinimumHeight(100)  # Allow shrinking when window is shorter
         self.setup_default_classes()
         self.class_list.currentRowChanged.connect(self.update_current_class)
         class_layout.addWidget(self.class_list, 2)  # stretch factor 2 for expansion
-        
+
         self.add_class_btn = QPushButton("Add New Class")
         self.add_class_btn.clicked.connect(self.add_new_class)
         class_layout.addWidget(self.add_class_btn)
-        
+
         self.change_color_btn = QPushButton("Change Class Color")
         self.change_color_btn.clicked.connect(self.change_class_color)
         class_layout.addWidget(self.change_color_btn)
-        
-        left_layout.addWidget(class_group)
-        
+
+        right_layout.addWidget(class_group)
+
         # Mask controls group
         mask_group = QGroupBox("Mask Controls")
         mask_layout = QVBoxLayout(mask_group)
-        
+
         # Mask opacity
         mask_layout.addWidget(QLabel("Mask Transparency (Q/E):"))
         self.opacity_slider = QSlider(Qt.Horizontal)
@@ -365,53 +389,37 @@ class SegmentationAnnotator(QMainWindow):
         self.opacity_slider.setValue(128)
         self.opacity_slider.valueChanged.connect(self.update_mask_opacity)
         mask_layout.addWidget(self.opacity_slider)
-        
+
         self.opacity_label = QLabel("50%")
         mask_layout.addWidget(self.opacity_label)
-        
+
         self.clear_mask_btn = QPushButton("Clear Mask")
         self.clear_mask_btn.clicked.connect(self.clear_mask)
         self.clear_mask_btn.setEnabled(False)
         mask_layout.addWidget(self.clear_mask_btn)
-        
+
         self.undo_btn = QPushButton("Undo (Ctrl+Z)")
         self.undo_btn.clicked.connect(self.undo_last_action)
         self.undo_btn.setEnabled(False)
         mask_layout.addWidget(self.undo_btn)
-        
-        left_layout.addWidget(mask_group)
-        
+
+        right_layout.addWidget(mask_group)
+
         # Zoom info group
         zoom_group = QGroupBox("View Info")
         zoom_layout = QVBoxLayout(zoom_group)
-        
+
         # Zoom level display
         self.zoom_label = QLabel("Zoom: 100%")
         zoom_layout.addWidget(self.zoom_label)
-        
-        left_layout.addWidget(zoom_group)
-        
+
+        right_layout.addWidget(zoom_group)
+
         # Add stretch at bottom to push everything up and maintain fixed spacing
-        left_layout.addStretch()
-        
-        # Right panel for image display
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        
-        # Scroll area for image
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setAlignment(Qt.AlignCenter)
-        
-        self.paint_widget = PaintWidget()
-        self.scroll_area.setWidget(self.paint_widget)
-        
-        right_layout.addWidget(self.scroll_area)
-        
-        # Add panels to content layout
-        left_scroll.setWidget(left_panel)
-        content_layout.addWidget(left_scroll)
-        content_layout.addWidget(right_panel)
+        right_layout.addStretch()
+
+        right_scroll.setWidget(right_panel)
+        content_layout.addWidget(right_scroll)
         
         # Setup keyboard shortcuts
         self.setup_shortcuts()
@@ -448,7 +456,7 @@ class SegmentationAnnotator(QMainWindow):
         self.eraser_shortcut.activated.connect(self.eraser_btn.click)
 
         # Refresh shortcut
-        self.refresh_shortcut = QShortcut(QKeySequence("R"), self)
+        self.refresh_shortcut = QShortcut(QKeySequence("F5"), self)
         self.refresh_shortcut.activated.connect(self.refresh_lists)
         
         # Opacity shortcuts
@@ -473,6 +481,35 @@ class SegmentationAnnotator(QMainWindow):
         for i in range(1, 10):
             shortcut = QShortcut(QKeySequence(str(i)), self)
             shortcut.activated.connect(lambda idx=i: self.select_class_by_shortcut(idx))
+
+    def on_image_name_selected(self, row):
+        """Navigate to the image selected in the image name list."""
+        if row < 0 or not self.image_list or row >= len(self.image_list):
+            return
+        if row == self.current_image_index:
+            return
+        if self.check_save_before_leave():
+            self.current_image_index = row
+            self.load_current_image()
+            self.update_navigation_buttons()
+            self.update_image_info()
+
+    def update_image_name_list(self):
+        """Populate the image name list widget from self.image_list."""
+        self.image_name_list.blockSignals(True)
+        self.image_name_list.clear()
+        for img_path in self.image_list:
+            self.image_name_list.addItem(os.path.basename(img_path))
+        if self.image_list:
+            self.image_name_list.setCurrentRow(self.current_image_index)
+        self.image_name_list.blockSignals(False)
+
+    def sync_image_name_list_selection(self):
+        """Sync the image name list selection to the current image index."""
+        self.image_name_list.blockSignals(True)
+        if self.image_list:
+            self.image_name_list.setCurrentRow(self.current_image_index)
+        self.image_name_list.blockSignals(False)
 
     def select_class_by_shortcut(self, key_num):
         row = key_num - 1
@@ -605,6 +642,7 @@ class SegmentationAnnotator(QMainWindow):
             if self.image_list:
                 self.current_image_index = 0
                 self.refresh_btn.setEnabled(True)
+                self.update_image_name_list()
                 self.load_current_image()
                 self.update_navigation_buttons()
                 self.update_image_info()
@@ -631,12 +669,14 @@ class SegmentationAnnotator(QMainWindow):
                 self.current_image_index = self.image_list.index(current_name)
             else:
                 self.current_image_index = min(self.current_image_index, len(self.image_list) - 1)
+            self.update_image_name_list()
             self.load_current_image()
             self.update_navigation_buttons()
             self.update_image_info()
         else:
             self.current_image_index = 0
             self.image_info_label.setText("No images loaded")
+            self.update_image_name_list()
 
     def load_current_image(self):
         if not self.image_list or self.current_image_index >= len(self.image_list):
@@ -757,7 +797,8 @@ class SegmentationAnnotator(QMainWindow):
                 self.load_current_image()
                 self.update_navigation_buttons()
                 self.update_image_info()
-    
+                self.sync_image_name_list_selection()
+
     def next_image(self):
         if self.image_list and self.current_image_index < len(self.image_list) - 1:
             if self.check_save_before_leave():
@@ -765,6 +806,7 @@ class SegmentationAnnotator(QMainWindow):
                 self.load_current_image()
                 self.update_navigation_buttons()
                 self.update_image_info()
+                self.sync_image_name_list_selection()
     
     def update_navigation_buttons(self):
         if not self.image_list:
@@ -791,20 +833,7 @@ class SegmentationAnnotator(QMainWindow):
     
     def check_save_before_leave(self):
         if self.mask_modified and self.mask_save_folder:
-            reply = QMessageBox.question(
-                self, "Unsaved Changes", 
-                "You have unsaved changes to the mask. Do you want to save before leaving this image?",
-                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-                QMessageBox.Yes
-            )
-            
-            if reply == QMessageBox.Yes:
-                self.save_mask()
-                return True
-            elif reply == QMessageBox.No:
-                return True
-            else:  # Cancel
-                return False
+            self.save_mask()
         return True
     def closeEvent(self, event):
         if not self.check_save_before_leave():
@@ -979,6 +1008,7 @@ class SegmentationAnnotator(QMainWindow):
                         else:
                             self.current_image_index = 0
 
+                        self.update_image_name_list()
                         self.load_current_image()
                         self.update_navigation_buttons()
                         self.update_image_info()
@@ -1225,12 +1255,12 @@ class SegmentationAnnotator(QMainWindow):
         
         if img_path in self.image_list:
             self.image_list.remove(img_path)
-            
+
+        self.update_image_name_list()
+
         if not self.image_list:
             # Clear UI if no images left
             try:
-                # `clear_image` method might not exist in PaintWidget, so we do manual clear setup if needed
-                # Actually, `paint_widget.load_image` on empty path fails, let's just clear mask and image
                 self.paint_widget.image = None
                 self.paint_widget.scaled_image = None
                 self.paint_widget.mask = None
@@ -1245,9 +1275,10 @@ class SegmentationAnnotator(QMainWindow):
 
         if self.current_image_index >= len(self.image_list):
             self.current_image_index = len(self.image_list) - 1
-            
+
         self.load_current_image()
         self.update_navigation_buttons()
         self.update_image_info()
+        self.sync_image_name_list_selection()
 
 
