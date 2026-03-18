@@ -149,8 +149,8 @@ class PaintWidget(QWidget):
     def wheelEvent(self, event):
         """Handle mouse wheel for zooming"""
         if self.image is not None:
-            # Zoom with Ctrl+wheel
-            if event.modifiers() & Qt.ControlModifier:
+            # Zoom with Shift+wheel
+            if event.modifiers() & Qt.ShiftModifier:
                 delta = event.angleDelta().y()
                 zoom_in = delta > 0
                 zoom_step = 0.1

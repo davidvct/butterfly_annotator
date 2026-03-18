@@ -88,16 +88,22 @@ class SegmentationAnnotator(QMainWindow):
         
     def setup_menu(self):
         menubar = self.menuBar()
-        
+
         # File Menu
         file_menu = menubar.addMenu("&File")
 
+        new_session_action = QAction("New Session", self)
+        new_session_action.setShortcut("Ctrl+N")
+        new_session_action.triggered.connect(self.new_session)
+        file_menu.addAction(new_session_action)
+
         open_session_action = QAction("Open Session", self)
-        open_session_action.setShortcut("Ctrl+O")
+        open_session_action.setShortcut("Ctrl+L")
         open_session_action.triggered.connect(self.open_session_dialog)
         file_menu.addAction(open_session_action)
 
         save_session_action = QAction("Save Session", self)
+        save_session_action.setShortcut("Ctrl+S")
         save_session_action.triggered.connect(self.save_session_dialog)
         file_menu.addAction(save_session_action)
 
@@ -105,9 +111,14 @@ class SegmentationAnnotator(QMainWindow):
         save_session_as_action.setShortcut("Ctrl+Shift+S")
         save_session_as_action.triggered.connect(self.save_session_as_dialog)
         file_menu.addAction(save_session_as_action)
-        
+
         file_menu.addSeparator()
-        
+
+        self.recent_sessions_menu = file_menu.addMenu("Recent Sessions")
+        self.update_recent_sessions_menu()
+
+        file_menu.addSeparator()
+
         exit_action = QAction("Exit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
@@ -162,13 +173,13 @@ class SegmentationAnnotator(QMainWindow):
         view_menu.addSeparator()
         
         self.zoom_in_action = QAction("Zoom In", self)
-        self.zoom_in_action.setShortcut("W")
+        self.zoom_in_action.setShortcut("Shift+Up")
         self.zoom_in_action.triggered.connect(self.zoom_in)
         self.zoom_in_action.setEnabled(False)
         view_menu.addAction(self.zoom_in_action)
         
         self.zoom_out_action = QAction("Zoom Out", self)
-        self.zoom_out_action.setShortcut("S")
+        self.zoom_out_action.setShortcut("Shift+Down")
         self.zoom_out_action.triggered.connect(self.zoom_out)
         self.zoom_out_action.setEnabled(False)
         view_menu.addAction(self.zoom_out_action)
@@ -311,12 +322,12 @@ class SegmentationAnnotator(QMainWindow):
 
         # Navigation controls
         nav_layout = QHBoxLayout()
-        self.prev_btn = QPushButton("◀ Previous (Left)")
+        self.prev_btn = QPushButton("◀ Previous (A)")
         self.prev_btn.clicked.connect(self.previous_image)
         self.prev_btn.setEnabled(False)
         nav_layout.addWidget(self.prev_btn)
 
-        self.next_btn = QPushButton("Next ▶ (Right)")
+        self.next_btn = QPushButton("Next ▶ (D)")
         self.next_btn.clicked.connect(self.next_image)
         self.next_btn.setEnabled(False)
         nav_layout.addWidget(self.next_btn)
@@ -391,7 +402,7 @@ class SegmentationAnnotator(QMainWindow):
         self.opacity_label = QLabel("50%")
         mask_layout.addWidget(self.opacity_label)
 
-        self.clear_mask_btn = QPushButton("Clear Mask")
+        self.clear_mask_btn = QPushButton("Clear Mask (C)")
         self.clear_mask_btn.clicked.connect(self.clear_mask)
         self.clear_mask_btn.setEnabled(False)
         mask_layout.addWidget(self.clear_mask_btn)
@@ -443,10 +454,10 @@ class SegmentationAnnotator(QMainWindow):
         self.zoom_out_minus.activated.connect(self.zoom_out)
         
         # Brush shortcuts
-        self.brush_inc = QShortcut(QKeySequence("D"), self)
+        self.brush_inc = QShortcut(QKeySequence("Right"), self)
         self.brush_inc.activated.connect(lambda: self.brush_size_slider.setValue(self.brush_size_slider.value() + 1))
-        
-        self.brush_dec = QShortcut(QKeySequence("A"), self)
+
+        self.brush_dec = QShortcut(QKeySequence("Left"), self)
         self.brush_dec.activated.connect(lambda: self.brush_size_slider.setValue(self.brush_size_slider.value() - 1))
         
         # Eraser shortcut
@@ -465,15 +476,18 @@ class SegmentationAnnotator(QMainWindow):
         self.opacity_dec.activated.connect(lambda: self.opacity_slider.setValue(max(0, self.opacity_slider.value() - 25)))
         
         # Navigation shortcuts
-        self.prev_shortcut = QShortcut(QKeySequence("Left"), self)
+        self.prev_shortcut = QShortcut(QKeySequence("A"), self)
         self.prev_shortcut.activated.connect(self.previous_image)
-        
-        self.next_shortcut = QShortcut(QKeySequence("Right"), self)
+
+        self.next_shortcut = QShortcut(QKeySequence("D"), self)
         self.next_shortcut.activated.connect(self.next_image)
         
-        # Save Mask shortcut
-        self.save_mask_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
-        self.save_mask_shortcut.activated.connect(self.save_mask)
+        # Session shortcuts
+        self.load_session_shortcut = QShortcut(QKeySequence("Ctrl+L"), self)
+        self.load_session_shortcut.activated.connect(self.open_session_dialog)
+
+        self.save_session_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.save_session_shortcut.activated.connect(self.save_session_dialog)
         
         # Class selection shortcuts 1-9
         for i in range(1, 10):
@@ -877,6 +891,108 @@ class SegmentationAnnotator(QMainWindow):
             self.save_session(file_path)
             self.statusBar().showMessage("Session saved successfully.", 3000)
 
+    def new_session(self):
+        """Reset to a blank session."""
+        # Check for unsaved changes
+        current_data = json.dumps(self.get_session_data(), sort_keys=True)
+        if current_data != self.last_saved_session_data:
+            reply = QMessageBox.question(
+                self, "Unsaved Changes",
+                "Current session has unsaved changes. Save before creating a new session?",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel
+            )
+            if reply == QMessageBox.Cancel:
+                return
+            if reply == QMessageBox.Save:
+                self.save_session_dialog()
+
+        self.current_session_file = None
+        self.current_image_path = None
+        self.mask_save_folder = None
+        self.image_folder = None
+        self.image_list = []
+        self.current_image_index = 0
+        self.mask_modified = False
+        self.class_definitions = None
+        self.class_definition_path = None
+        self.class_names = {}
+        self.last_remove_img_path = ""
+        self.last_remove_mask_path = ""
+        self.last_remove_words = ""
+        self.last_remove_case_sensitive = False
+        self.last_saved_session_data = "{}"
+
+        # Reset UI
+        self.brush_size_slider.setValue(5)
+        self.opacity_slider.setValue(128)
+        self.mask_suffix_combo.setCurrentIndex(0)
+        self.class_list.clear()
+        self.image_name_list.clear()
+        self.image_info_label.setText("No images loaded")
+        if hasattr(self, 'lock_zoom_action'):
+            self.lock_zoom_action.setChecked(False)
+
+        # Clear canvas
+        try:
+            self.paint_widget.image = None
+            self.paint_widget.scaled_image = None
+            self.paint_widget.mask = None
+            self.paint_widget.scaled_mask = None
+            self.paint_widget.update()
+        except Exception:
+            pass
+
+        self.setup_default_classes()
+        self.update_paths_display()
+        self.update_navigation_buttons()
+        self.update_window_title()
+        self.statusBar().showMessage("New session created.", 3000)
+
+    def update_recent_sessions_menu(self):
+        """Populate the Recent Sessions submenu from QSettings."""
+        self.recent_sessions_menu.clear()
+        recent = self.settings.value("recent_sessions", [])
+        if isinstance(recent, str):
+            recent = [recent] if recent else []
+        if not recent:
+            no_recent = QAction("(No recent sessions)", self)
+            no_recent.setEnabled(False)
+            self.recent_sessions_menu.addAction(no_recent)
+            return
+        for path in recent:
+            action = QAction(path, self)
+            action.triggered.connect(lambda checked, p=path: self.open_recent_session(p))
+            self.recent_sessions_menu.addAction(action)
+
+    def open_recent_session(self, file_path):
+        """Open a session from the recent sessions list."""
+        if os.path.exists(file_path):
+            self.load_session(file_path)
+        else:
+            QMessageBox.warning(self, "Error", f"Session file not found:\n{file_path}")
+            recent = self.settings.value("recent_sessions", [])
+            if isinstance(recent, str):
+                recent = [recent] if recent else []
+            if file_path in recent:
+                recent.remove(file_path)
+                self.settings.setValue("recent_sessions", recent)
+                self.settings.sync()
+            self.update_recent_sessions_menu()
+
+    def add_to_recent_sessions(self, file_path):
+        """Add a session file path to the recent sessions list."""
+        recent = self.settings.value("recent_sessions", [])
+        if isinstance(recent, str):
+            recent = [recent] if recent else []
+        if file_path in recent:
+            recent.remove(file_path)
+        recent.insert(0, file_path)
+        recent = recent[:10]  # Keep max 10 recent sessions
+        self.settings.setValue("recent_sessions", recent)
+        self.settings.sync()
+        if hasattr(self, 'recent_sessions_menu'):
+            self.update_recent_sessions_menu()
+
     def get_session_data(self):
         session_data = {
             'image_folder': self.image_folder,
@@ -911,13 +1027,15 @@ class SegmentationAnnotator(QMainWindow):
             self.settings.setValue("last_session", file_path)
             self.settings.sync()
         self.update_window_title()
-        
+
         session_data = self.get_session_data()
         self.last_saved_session_data = json.dumps(session_data, sort_keys=True)
-            
+
         success, msg = SessionManager.save_session(file_path, session_data)
         if not success:
             print(msg)
+        else:
+            self.add_to_recent_sessions(file_path)
 
     def load_session(self, file_path=None):
         if file_path is None:
@@ -937,7 +1055,8 @@ class SegmentationAnnotator(QMainWindow):
         if hasattr(self, 'settings'):
             self.settings.setValue("last_session", file_path)
             self.settings.sync()
-            
+        self.add_to_recent_sessions(file_path)
+
         try:
             if 'lock_zoom' in session_data and hasattr(self, 'lock_zoom_action'):
                 self.lock_zoom_action.setChecked(session_data.get('lock_zoom', False))
@@ -1219,33 +1338,35 @@ class SegmentationAnnotator(QMainWindow):
         
         parent_dir = os.path.dirname(self.image_folder)
         moved_dir = os.path.join(parent_dir, 'Moved')
-        
-        if not os.path.exists(moved_dir):
-            try:
-                os.makedirs(moved_dir)
-            except Exception as e:
-                QMessageBox.warning(self, "Error", f"Could not create Moved folder:\n{str(e)}")
-                return
-                
+        moved_images_dir = os.path.join(moved_dir, 'images')
+        moved_masks_dir = os.path.join(moved_dir, 'masks')
+
+        try:
+            os.makedirs(moved_images_dir, exist_ok=True)
+            os.makedirs(moved_masks_dir, exist_ok=True)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not create Moved subfolders:\n{str(e)}")
+            return
+
         img_path = self.current_image_path
         image_name_ext = os.path.basename(img_path)
         image_name = os.path.splitext(image_name_ext)[0]
-        
-        # Move image
-        dest_img_path = os.path.join(moved_dir, image_name_ext)
+
+        # Move image to Moved/images/
+        dest_img_path = os.path.join(moved_images_dir, image_name_ext)
         try:
             shutil.move(img_path, dest_img_path)
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not move image:\n{str(e)}")
             return
-            
-        # Move masks
+
+        # Move masks to Moved/masks/
         if getattr(self, 'mask_save_folder', None):
             suffixes = ["", "_tagged", "_mask"]
             for suffix in suffixes:
                 mask_path = os.path.join(self.mask_save_folder, f"{image_name}{suffix}.png")
                 if os.path.exists(mask_path):
-                    dest_mask_path = os.path.join(moved_dir, f"{image_name}{suffix}.png")
+                    dest_mask_path = os.path.join(moved_masks_dir, f"{image_name}{suffix}.png")
                     try:
                         shutil.move(mask_path, dest_mask_path)
                     except Exception as e:
