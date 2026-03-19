@@ -158,7 +158,7 @@ class SegmentationAnnotator(QMainWindow):
         
         self.lock_zoom_action = QAction("Lock Zoom", self)
         self.lock_zoom_action.setCheckable(True)
-        self.lock_zoom_action.setChecked(False)
+        self.lock_zoom_action.setChecked(True)
         self.lock_zoom_action.triggered.connect(self.on_lock_zoom_toggled)
         setting_menu.addAction(self.lock_zoom_action)
         
@@ -172,14 +172,12 @@ class SegmentationAnnotator(QMainWindow):
         
         view_menu.addSeparator()
         
-        self.zoom_in_action = QAction("Zoom In", self)
-        self.zoom_in_action.setShortcut("Shift+Up")
+        self.zoom_in_action = QAction("Zoom In (LShift+Scroll Up)", self)
         self.zoom_in_action.triggered.connect(self.zoom_in)
         self.zoom_in_action.setEnabled(False)
         view_menu.addAction(self.zoom_in_action)
-        
-        self.zoom_out_action = QAction("Zoom Out", self)
-        self.zoom_out_action.setShortcut("Shift+Down")
+
+        self.zoom_out_action = QAction("Zoom Out (LShift+Scroll Down)", self)
         self.zoom_out_action.triggered.connect(self.zoom_out)
         self.zoom_out_action.setEnabled(False)
         view_menu.addAction(self.zoom_out_action)
@@ -362,7 +360,7 @@ class SegmentationAnnotator(QMainWindow):
         brush_layout = QVBoxLayout(brush_group)
 
         # Brush size
-        brush_layout.addWidget(QLabel("Brush Size (A/D):"))
+        brush_layout.addWidget(QLabel("Brush Size (Ctrl+Scroll):"))
         self.brush_size_slider = QSlider(Qt.Horizontal)
         self.brush_size_slider.setRange(1, 50)
         self.brush_size_slider.setValue(10)
@@ -412,6 +410,12 @@ class SegmentationAnnotator(QMainWindow):
         self.undo_btn.setEnabled(False)
         mask_layout.addWidget(self.undo_btn)
 
+        self.hide_mask_btn = QPushButton("Hide Mask (H)")
+        self.hide_mask_btn.setCheckable(True)
+        self.hide_mask_btn.setChecked(False)
+        self.hide_mask_btn.clicked.connect(self.toggle_mask_visibility)
+        mask_layout.addWidget(self.hide_mask_btn)
+
         right_layout.addWidget(mask_group)
 
         # Zoom info group
@@ -439,30 +443,15 @@ class SegmentationAnnotator(QMainWindow):
         self.undo_shortcut = QShortcut(QKeySequence.Undo, self)
         self.undo_shortcut.activated.connect(self.undo_last_action)
         
-        # Zoom shortcuts (Ctrl++ and Ctrl+- keep working as fallbacks)
-        self.zoom_in_shortcut = QShortcut(QKeySequence.ZoomIn, self)
-        self.zoom_in_shortcut.activated.connect(self.zoom_in)
-        
-        self.zoom_out_shortcut = QShortcut(QKeySequence.ZoomOut, self)
-        self.zoom_out_shortcut.activated.connect(self.zoom_out)
-        
-        # Additional zoom shortcuts with + and - keys
-        self.zoom_in_plus = QShortcut(QKeySequence("+"), self)
-        self.zoom_in_plus.activated.connect(self.zoom_in)
-        
-        self.zoom_out_minus = QShortcut(QKeySequence("-"), self)
-        self.zoom_out_minus.activated.connect(self.zoom_out)
-        
-        # Brush shortcuts
-        self.brush_inc = QShortcut(QKeySequence("Right"), self)
-        self.brush_inc.activated.connect(lambda: self.brush_size_slider.setValue(self.brush_size_slider.value() + 1))
-
-        self.brush_dec = QShortcut(QKeySequence("Left"), self)
-        self.brush_dec.activated.connect(lambda: self.brush_size_slider.setValue(self.brush_size_slider.value() - 1))
+        # Brush size is changed via Ctrl+mouse scroll (see paint_widget.wheelEvent)
         
         # Eraser shortcut
         self.eraser_shortcut = QShortcut(QKeySequence("M"), self)
         self.eraser_shortcut.activated.connect(self.eraser_btn.click)
+
+        # Hide/show mask shortcut
+        self.hide_mask_shortcut = QShortcut(QKeySequence("H"), self)
+        self.hide_mask_shortcut.activated.connect(self.toggle_mask_visibility)
 
         # Refresh shortcut
         self.refresh_shortcut = QShortcut(QKeySequence("F5"), self)
@@ -711,9 +700,7 @@ class SegmentationAnnotator(QMainWindow):
             # Reset modification flag for new image
             self.mask_modified = False
             
-            # Reset zoom if lock zoom is disabled
-            if hasattr(self, 'lock_zoom_action') and not self.lock_zoom_action.isChecked():
-                self.zoom_reset()
+            # Preserve current zoom level when switching images
         else:
             QMessageBox.warning(self, "Error", f"Failed to load image!\n{message}")
     
@@ -1325,6 +1312,9 @@ class SegmentationAnnotator(QMainWindow):
 
     def toggle_mask_visibility(self):
         self.paint_widget.toggle_mask_visibility()
+        hidden = not self.paint_widget.mask_visible
+        self.hide_mask_btn.setChecked(hidden)
+        self.hide_mask_btn.setText("Show Mask (H)" if hidden else "Hide Mask (H)")
 
     def move_current_image_and_mask(self):
         if not self.current_image_path or not self.image_folder:

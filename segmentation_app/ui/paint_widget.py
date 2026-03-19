@@ -147,28 +147,50 @@ class PaintWidget(QWidget):
         return QPoint(int(screen_point.x() / self.zoom_factor), int(screen_point.y() / self.zoom_factor))
     
     def wheelEvent(self, event):
-        """Handle mouse wheel for zooming"""
+        """Handle mouse wheel for zooming and brush size"""
         if self.image is not None:
-            # Zoom with Shift+wheel
-            if event.modifiers() & Qt.ShiftModifier:
+            # Brush size with Ctrl+wheel
+            if event.modifiers() & Qt.ControlModifier:
                 delta = event.angleDelta().y()
+                if delta == 0:
+                    delta = event.angleDelta().x()
+                step = 1
+                if delta > 0:
+                    new_size = self.brush_size + step
+                else:
+                    new_size = self.brush_size - step
+                new_size = max(1, min(50, new_size))
+                self.set_brush_size(new_size)
+                # Update parent slider
+                parent = self.parent()
+                while parent and not hasattr(parent, 'brush_size_slider'):
+                    parent = parent.parent()
+                if parent and hasattr(parent, 'brush_size_slider'):
+                    parent.brush_size_slider.setValue(new_size)
+                event.accept()
+            # Zoom with Shift+wheel (LShift + middle mouse scroll)
+            elif event.modifiers() & Qt.ShiftModifier:
+                delta = event.angleDelta().y()
+                # On some systems, Shift+wheel sends horizontal delta instead of vertical
+                if delta == 0:
+                    delta = event.angleDelta().x()
                 zoom_in = delta > 0
                 zoom_step = 0.1
-                
+
                 if zoom_in:
                     new_zoom = self.zoom_factor + zoom_step
                 else:
                     new_zoom = self.zoom_factor - zoom_step
-                
+
                 self.set_zoom(new_zoom)
-                
+
                 # Update parent zoom controls
                 parent = self.parent()
                 while parent and not hasattr(parent, 'update_zoom_display'):
                     parent = parent.parent()
                 if parent and hasattr(parent, 'update_zoom_display'):
                     parent.update_zoom_display()
-                
+
                 event.accept()
             else:
                 super().wheelEvent(event)
